@@ -1,8 +1,63 @@
-/* Usage collection for sudokupad_to_penpa. The database is only accessible
- * through the owner's Cloudflare account; this worker has no log-reading API. */
+/* Usage collection for sudokupad_to_penpa. Reading logs requires the owner's
+ * ADMIN_TOKEN secret; public conversion requests can only add records. */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_URL_LENGTH = 900000;
 const DEFAULT_ORIGINS = ["https://cyddrdrd.github.io"];
+const LOG_COLUMNS = ["event_id", "received_at", "started_at", "input_url", "output_url",
+  "no_solution_check", "status", "input_format", "error", "version"];
+
+function adminHeaders(contentType = "application/json; charset=utf-8") {
+  // Admin responses deliberately have no CORS permissions, including failures.
+  return {"Content-Type": contentType, "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"};
+}
+
+function adminError(status, message, csv) {
+  return new Response(csv ? message : JSON.stringify({success: false, error: message}),
+    {status, headers: adminHeaders(csv ? "text/plain; charset=utf-8" : undefined)});
+}
+
+function csvEscape(value) {
+  let text = String(value ?? "");
+  // Quoting alone does not stop spreadsheet formulas in user-supplied fields.
+  if (/^[\s\uFEFF]*[=+\-@]|^[\t\r\n]/u.test(text)) text = "'" + text;
+  return '"' + text.replaceAll('"', '""') + '"';
+}
+
+async function readLogs(request, env, url) {
+  const csv = url.pathname === "/admin/logs.csv";
+  if (request.method !== "GET") {
+    const response = adminError(405, "Method is not allowed.", csv);
+    response.headers.set("Allow", "GET");
+    return response;
+  }
+  const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get("Authorization") || "");
+  const token = bearer ? bearer[1] : url.searchParams.get("token");
+  if (typeof env.ADMIN_TOKEN !== "string" || !env.ADMIN_TOKEN.trim() || token !== env.ADMIN_TOKEN) {
+    return adminError(401, "Unauthorized", csv);
+  }
+  const requestedLimit = Number(url.searchParams.get("limit") || "100");
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(500, Math.floor(requestedLimit))) : 100;
+  try {
+    const result = await env.DB.prepare(`
+      SELECT event_id, received_at, started_at, input_url, output_url,
+             no_solution_check, status, input_format, error, version
+      FROM conversion_events
+      ORDER BY received_at DESC, rowid DESC
+      LIMIT ?
+    `).bind(limit).all();
+    if (!result || result.success === false || !Array.isArray(result.results)) throw new Error("Storage failed.");
+    const logs = result.results;
+    if (csv) {
+      const body = [LOG_COLUMNS.join(","), ...logs.map(row => LOG_COLUMNS.map(key => csvEscape(row[key])).join(","))].join("\r\n");
+      return new Response(body, {headers: {...adminHeaders("text/csv; charset=utf-8"),
+        "Content-Disposition": "attachment; filename=sudokupad_to_penpa_logs.csv"}});
+    }
+    return new Response(JSON.stringify({success: true, count: logs.length, logs}), {headers: adminHeaders()});
+  } catch {
+    return adminError(503, "Usage storage is temporarily unavailable.", csv);
+  }
+}
 
 function allowedOrigins(env) {
   // Local development may opt into exact origins, such as http://localhost:8766.
@@ -100,9 +155,11 @@ function validateEvent(value) {
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/admin/logs" || url.pathname === "/admin/logs.csv") return readLogs(request, env, url);
     const origin = request.headers.get("Origin");
     if (!allowedOrigins(env).has(origin)) return reply(403, {ok: false, error: "Origin is not allowed."});
-    if (new URL(request.url).pathname !== "/log") return reply(404, {ok: false, error: "Not found."}, origin);
+    if (url.pathname !== "/log") return reply(404, {ok: false, error: "Not found."}, origin);
     if (request.method === "OPTIONS") {
       const method = request.headers.get("Access-Control-Request-Method");
       const headers = (request.headers.get("Access-Control-Request-Headers") || "").toLowerCase().split(",").map(value => value.trim()).filter(Boolean);
