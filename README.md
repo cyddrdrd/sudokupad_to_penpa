@@ -1,10 +1,3 @@
-## Disclaimer ##
-
-This tool is intended for puzzle setters, testers, and those who want to play SudokuPad puzzles in Penpa+.
-Please respect puzzle authors and do not redistribute their puzzles without permission.
-
----
-
 # SudokuPad to Penpa+
 
 SudokuPad to Penpa+ is a small web tool for converting SudokuPad links into Penpa+ links.
@@ -14,12 +7,7 @@ Website: https://cyddrdrd.github.io/sudokupad_to_penpa/
 
 ## What it does
 
-SudokuPad links can contain:
-
-- the puzzle grid, clues, and rules
-- an answer for solution checking
-
-This tool decodes the link, converts the supported puzzle objects, and generates a new Penpa+ link.
+This tool decodes the sudokupad link, converts the supported puzzle objects, and generates a new Penpa+ link.
 When the original puzzle includes an answer, the generated link includes answer check unless "No solution check" is ticked.
 When no answer is included, the generated link has no solution check.
 
