@@ -170,7 +170,8 @@
     const lines = [header, JSON.stringify([0, 0, 0, 0]),
       JSON.stringify(mode.grid) + '~"number"~' + JSON.stringify(mode.pu_a.number),
       JSON.stringify(question), "", JSON.stringify(deltaCenters),
-      JSON.stringify(["number", "sudoku", "surface", "symbol", "line", "lineE"]),
+      // An empty selector keeps Penpa's full set of solving tools available.
+      "[]",
       JSON.stringify(andSettings), '"x"', '"x"', "[3,2,4]", JSON.stringify(mode),
       '"x"', "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
     let text = lines.join("\n");
