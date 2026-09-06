@@ -209,3 +209,176 @@ test('storage errors return a retryable failure without exposing database intern
   const failure = {prepare() {return {bind() {return {async run() {return {success: false};}};}};}};
   assert.equal((await run(event(), {}, {DB: failure})).response.status, 503);
 });
+
+const adminToken = 'test-only-admin-token';
+const logColumns = ['event_id', 'received_at', 'started_at', 'input_url', 'output_url',
+  'no_solution_check', 'status', 'input_format', 'error', 'version'];
+
+function logRow(overrides = {}) {
+  return {event_id: 'test-event-00000001', received_at: '2026-09-06T15:24:00.000Z',
+    started_at: '2026-09-06T15:23:45.123Z', input_url: event().inputUrl,
+    output_url: event().outputUrl, no_solution_check: 0, status: 'success',
+    input_format: 'scl', error: null, version: '0.2.0', ...overrides};
+}
+
+function adminDatabase(rows = [logRow()]) {
+  const limits = [];
+  return {limits, DB: {prepare(sql) {
+    const selected = /SELECT\s+([\s\S]+?)\s+FROM conversion_events/.exec(sql);
+    assert.ok(selected, 'Read from the usage table with explicit columns');
+    assert.deepEqual(selected[1].split(',').map(column => column.trim()), logColumns);
+    assert.match(sql, /ORDER BY received_at DESC, rowid DESC/);
+    assert.match(sql, /LIMIT \?/);
+    assert.equal((sql.match(/\?/g) || []).length, 1);
+    return {bind(...values) {
+      assert.equal(values.length, 1);
+      assert.ok(Number.isInteger(values[0]) && values[0] >= 1 && values[0] <= 500);
+      limits.push(values[0]);
+      return {async all() {return {success: true, results: rows.slice(0, values[0])};}};
+    }};
+  }}};
+}
+
+function adminRequest(path = '/admin/logs', parameters = {}, options = {}) {
+  const url = new URL(path, endpoint);
+  for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
+  return new Request(url, options);
+}
+
+function checkAdminHeaders(response) {
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal([...response.headers.keys()].some(key => key.startsWith('access-control-')), false);
+}
+
+test('the private JSON viewer works as a top-level navigation and returns the stored fields', async () => {
+  const {default: worker} = await workerPromise;
+  const rows = [logRow(), logRow({event_id: 'test-event-00000002', received_at: '2026-09-06T15:20:00.000Z',
+    input_url: '', output_url: null, no_solution_check: 1, status: 'error', input_format: null,
+    error: 'Please paste a SudokuPad link first.'})];
+  const db = adminDatabase(rows);
+  const response = await worker.fetch(adminRequest('/admin/logs', {token: adminToken}),
+    {ADMIN_TOKEN: adminToken, DB: db.DB});
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('Content-Type'), /^application\/json/);
+  assert.deepEqual(await response.json(), {success: true, count: 2, logs: rows});
+  assert.deepEqual(db.limits, [100]);
+  checkAdminHeaders(response);
+});
+
+for (const path of ['/admin/logs', '/admin/logs.csv']) {
+  test(path + ' rejects absent, wrong, or unconfigured tokens without touching storage', async () => {
+    const {default: worker} = await workerPromise;
+    const DB = {prepare() {assert.fail('Unauthorized requests must not query the database');}};
+    for (const [configured, supplied] of [
+      [adminToken, undefined], [adminToken, ''], [adminToken, 'incorrect'],
+      [undefined, adminToken], ['', ''], ['   ', '   '], [null, 'null']
+    ]) {
+      const response = await worker.fetch(adminRequest(path, supplied === undefined ? {} : {token: supplied}),
+        {ADMIN_TOKEN: configured, DB});
+      assert.equal(response.status, 401);
+      assert.equal(await response.text(), path.endsWith('.csv') ? 'Unauthorized' :
+        JSON.stringify({success: false, error: 'Unauthorized'}));
+      checkAdminHeaders(response);
+    }
+  });
+
+  test(path + ' supports Bearer authentication without granting CORS access', async () => {
+    const {default: worker} = await workerPromise;
+    const db = adminDatabase();
+    const response = await worker.fetch(adminRequest(path, {}, {headers: {
+      Authorization: 'Bearer ' + adminToken, Origin: origin
+    }}), {ADMIN_TOKEN: adminToken, DB: db.DB});
+    assert.equal(response.status, 200);
+    checkAdminHeaders(response);
+    for (const authorization of ['Bearer incorrect', 'Basic ' + adminToken, 'Bearer', 'Bearer ' + adminToken + ' extra']) {
+      const rejected = await worker.fetch(adminRequest(path, {}, {headers: {Authorization: authorization}}),
+        {ADMIN_TOKEN: adminToken, DB: db.DB});
+      assert.equal(rejected.status, 401);
+      checkAdminHeaders(rejected);
+    }
+    assert.deepEqual(db.limits, [100]);
+  });
+
+  test(path + ' never reads or grants preflight access through another HTTP method', async () => {
+    const {default: worker} = await workerPromise;
+    const DB = {prepare() {assert.fail('Only authenticated GET may query the database');}};
+    for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD']) {
+      const response = await worker.fetch(adminRequest(path, {token: adminToken}, {method,
+        headers: {Origin: origin, 'Access-Control-Request-Method': 'GET'}}), {ADMIN_TOKEN: adminToken, DB});
+      assert.equal(response.status, 405);
+      assert.equal(response.headers.get('Allow'), 'GET');
+      checkAdminHeaders(response);
+    }
+  });
+}
+
+test('admin limits are bounded integers passed as SQL parameters', async () => {
+  const {default: worker} = await workerPromise;
+  for (const [value, expected] of [['1', 1], ['500', 500], ['999999', 500], ['0', 1], ['-5', 1],
+    ['3.8', 3], ['', 100], ['Infinity', 100], ['NaN', 100], ['100; DROP TABLE conversion_events', 100]]) {
+    const db = adminDatabase();
+    const response = await worker.fetch(adminRequest('/admin/logs', {token: adminToken, limit: value}),
+      {ADMIN_TOKEN: adminToken, DB: db.DB});
+    assert.equal(response.status, 200);
+    assert.deepEqual(db.limits, [expected]);
+  }
+});
+
+test('CSV exports preserve commas, quotes, line breaks, nulls and download metadata', async () => {
+  const {default: worker} = await workerPromise;
+  const row = logRow({input_url: 'https://sudokupad.app/puzzle?text="hello, world"',
+    output_url: null, status: 'error', error: 'Line 1\nLine 2, "quoted"'});
+  const response = await worker.fetch(adminRequest('/admin/logs.csv', {token: adminToken}),
+    {ADMIN_TOKEN: adminToken, DB: adminDatabase([row]).DB});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Content-Type'), 'text/csv; charset=utf-8');
+  assert.equal(response.headers.get('Content-Disposition'), 'attachment; filename=sudokupad_to_penpa_logs.csv');
+  const text = await response.text();
+  assert.ok(text.startsWith(logColumns.join(',') + '\r\n'));
+  assert.ok(text.includes('"https://sudokupad.app/puzzle?text=""hello, world"""'));
+  assert.ok(text.includes(',"","0","error",'));
+  assert.ok(text.includes('"Line 1\nLine 2, ""quoted"""'));
+  checkAdminHeaders(response);
+});
+
+test('CSV neutralizes spreadsheet formula prefixes while JSON preserves exact stored values', async () => {
+  const {default: worker} = await workerPromise;
+  const values = ['=HYPERLINK("https://example.com")', '+1+1', '-2+3', '@SUM(1)',
+    '\t=1+1', '\r=1+1', '\n=1+1', '  =1+1', '\uFEFF=1+1'];
+  for (const value of values) {
+    const row = logRow({input_url: value});
+    const DB = adminDatabase([row]).DB;
+    const response = await worker.fetch(adminRequest('/admin/logs.csv', {token: adminToken}), {ADMIN_TOKEN: adminToken, DB});
+    assert.ok((await response.text()).includes('"\'' + value.replaceAll('"', '""') + '"'));
+    const json = await worker.fetch(adminRequest('/admin/logs', {token: adminToken}), {ADMIN_TOKEN: adminToken, DB});
+    assert.equal((await json.json()).logs[0].input_url, value);
+  }
+});
+
+test('empty private logs retain a valid JSON result and CSV header', async () => {
+  const {default: worker} = await workerPromise;
+  const env = {ADMIN_TOKEN: adminToken, DB: adminDatabase([]).DB};
+  const json = await worker.fetch(adminRequest('/admin/logs', {token: adminToken}), env);
+  assert.deepEqual(await json.json(), {success: true, count: 0, logs: []});
+  const csv = await worker.fetch(adminRequest('/admin/logs.csv', {token: adminToken}), env);
+  assert.equal(await csv.text(), logColumns.join(','));
+});
+
+test('private reader storage failures never expose details or authentication tokens', async () => {
+  const {default: worker} = await workerPromise;
+  const failingDBs = [undefined, {prepare() {throw new Error('database secret ' + adminToken);}},
+    {prepare() {return {bind() {return {async all() {return {success: false, results: []};}};}};}}];
+  for (const path of ['/admin/logs', '/admin/logs.csv']) {
+    for (const DB of failingDBs) {
+      const response = await worker.fetch(adminRequest(path, {token: adminToken}), {ADMIN_TOKEN: adminToken, DB});
+      assert.equal(response.status, 503);
+      const text = await response.text();
+      assert.ok(!text.includes(adminToken));
+      assert.ok(!text.includes('database secret'));
+      assert.ok(!text.includes('logs'));
+      checkAdminHeaders(response);
+    }
+  }
+});
