@@ -1,4 +1,36 @@
 let isConverting = false;
+const USAGE_ENDPOINT = "https://sudokupad-to-penpa-log.cyddrdrd.workers.dev/log";
+const APP_VERSION = "0.2.0";
+
+function beginUsage(inputUrl, noSolutionCheck) {
+  const eventId = globalThis.crypto && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) + "-" + Math.random().toString(36).slice(2);
+  return {eventId, startedAt: new Date().toISOString(), inputUrl, noSolutionCheck,
+    outputUrl: null, inputFormat: null, error: null, version: APP_VERSION};
+}
+
+async function recordUsage(event) {
+  // Logging must not delay conversion or close a successfully opened puzzle.
+  // Retrying the same event ID cannot create duplicate rows in the Worker.
+  const body = JSON.stringify(event);
+  const keepalive = new TextEncoder().encode(body).length < 60000;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(USAGE_ENDPOINT, {method: "POST", credentials: "omit",
+        headers: {"Content-Type": "application/json"}, body, keepalive, signal: controller.signal});
+      if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 429)) return;
+    } catch (_) {
+      // Network errors are retried below without changing the conversion result.
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+  }
+  console.warn("Usage logging is temporarily unavailable.");
+}
 
 function setBusy(busy) {
   isConverting = busy;
@@ -24,11 +56,14 @@ async function convertOnly() {
   const input = document.getElementById("inputUrl").value.trim();
   const output = document.getElementById("outputUrl");
   const noSolutionCheck = document.getElementById("noSolutionCheck").checked;
+  const usage = beginUsage(input, noSolutionCheck);
 
   output.value = "";
 
   if (!input) {
-    setStatus("Please paste a SudokuPad link first.", "error");
+    const message = "Please paste a SudokuPad link first.";
+    setStatus(message, "error");
+    void recordUsage({...usage, status: "error", error: message});
     return null;
   }
 
@@ -43,9 +78,13 @@ async function convertOnly() {
     const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
     setStatus(["Converted successfully.", solutionStatus, ...warnings].join(" "), "success");
 
+    void recordUsage({...usage, status: "success", outputUrl: result.url, inputFormat: result.format || null});
+
     return result.url;
   } catch (err) {
-    setStatus("Error: " + (err && err.message ? err.message : String(err)), "error");
+    const message = err && err.message ? err.message : String(err);
+    setStatus("Error: " + message, "error");
+    void recordUsage({...usage, status: "error", error: message.slice(0, 4000)});
     return null;
   } finally {
     setBusy(false);

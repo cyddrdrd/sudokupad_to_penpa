@@ -414,7 +414,11 @@
       if (!fetcher) throw new Error("An internet connection is needed to load this shortened SudokuPad link.");
       let lastError;
       const encoded = encodeURIComponent(data);
-      for (const endpoint of ["https://sudokupad.svencodes.com/ctclegacy/" + encoded,
+      // Creator-named IDs are paths on SudokuPad's service (author/puzzle),
+      // but a single object key on Firebase. Encoding a slash as %2F makes
+      // the former return 404 even though the puzzle exists.
+      const encodedPath = data.split("/").map(encodeURIComponent).join("/");
+      for (const endpoint of ["https://sudokupad.svencodes.com/ctclegacy/" + encodedPath,
         "https://firebasestorage.googleapis.com/v0/b/sudoku-sandbox.appspot.com/o/" + encoded + "?alt=media"]) {
         try { data = await readURL(endpoint, fetcher); lastError = null; break; }
         catch (err) { lastError = err; }

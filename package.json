@@ -1,8 +1,8 @@
 {
   "name": "sudokupad_to_penpa",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Convert SudokuPad puzzle links into Penpa+ solve links.",
-  "scripts": {"test": "node --test tests/behavior.cjs"},
+  "scripts": {"test": "node --test tests/behavior.cjs tests/rules.cjs tests/yttrio.cjs tests/worker.cjs tests/page.cjs"},
   "engines": {"node": ">=18"}
 }

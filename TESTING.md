@@ -1,10 +1,23 @@
-# Testing 0.1.0
+# Testing 0.2.0
 
 Checked on 2026-09-06 against SudokuPad 0.611.0 and Penpa+ 3.2.4.
 
 ## Automated checks
 
-Run `npm test` (Node 18 or newer; no install needed). The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines.
+Run `npm test` (Node 18 or newer; no install needed). All 132 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, and logging retries that do not interrupt conversion.
+
+## 0.2.0 regression examples
+
+These four puzzles passed in the actual Penpa+ 3.2.4 editor. Artwork and solving tools loaded, Source matched the original input, correct answers passed, changed digits failed, and "No solution check" removed checking.
+
+| Puzzle | Coverage |
+| --- | --- |
+| [Japanese Sum Whisper Loop, yttrio](https://sudokupad.app/yttrio/japanese-sum-whisper-loop) | Creator-named path and outside clues |
+| [Exclusive Internal Skyscraper Yin Yang, yttrio](https://sudokupad.app/yttrio/exclusive-internal-skyscraper-yin-yang) | Creator-named path and shaded clues |
+| [Different Sum Whisper Loop, yttrio](https://sudokupad.app/yttrio/different-sum-whisper-loop) | Creator-named path and line artwork |
+| [Memories of a Far Off Land](https://sudokupad.app/k7qc98e00u?setting-nogrid.) | All five emoji hyperlinks retain their exact destinations; Source retains the full query |
+
+The short-link services were checked against live public responses. The repeatable editor checks use saved copies of those responses. The Worker passes Cloudflare's deployment build validation and a real local Worker/D1 integration run: success, failure, and blank-input events persisted, a retry created no duplicate, and CORS and validation rejected invalid requests.
 
 ## Real puzzles
 

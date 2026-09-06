@@ -112,9 +112,49 @@
     return String(value ?? "").replace(/[\r\n]/g, " ").replace(/,/g, "%2C");
   }
 
+  function sourceText(value) {
+    let source = String(value ?? "").trim();
+    if (!source) return "https://sudokupad.app/";
+    if (/^[a-z][a-z\d+.-]*:/i.test(source) && !/^https?:\/\//i.test(source)) {
+      throw new Error("The puzzle source must be an HTTP or HTTPS link.");
+    }
+    if (!/^https?:\/\//i.test(source)) source = "https://sudokupad.app/" + source;
+    const url = new URL(source);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+      throw new Error("The puzzle source must be an HTTP or HTTPS link without login details.");
+    }
+    // Source is not URI-decoded by Penpa. Retain the input spelling and query,
+    // encoding only characters which break its comma/newline header or HTML.
+    return source.replace(/[,\u0000-\u0020<>\u007f]/g, character => encodeURIComponent(character));
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
   function rulesText(value) {
-    return (Array.isArray(value) ? value.join("\n") : String(value ?? ""))
-      .replace(/\r\n?/g, "\n").replace(/\n/g, "%2D").replace(/,/g, "%2C")
+    const text = (Array.isArray(value) ? value.join("\n") : String(value ?? ""))
+      .replace(/\r\n?/g, "\n").replace(/\\n/g, "\n");
+    // SudokuPad rules are text, with Markdown links. Build the only permitted
+    // markup ourselves so clue text can never supply HTML or event handlers.
+    const links = /\[([^\]\r\n]{1,500})\]\((https?:\/\/[^)\r\n]{1,50000})\)/gi;
+    let html = "", start = 0, match;
+    while ((match = links.exec(text))) {
+      html += escapeHtml(text.slice(start, match.index));
+      let destination;
+      try {
+        const url = new URL(match[2]);
+        if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password &&
+          !/[\u0000-\u0020\u007f]/.test(match[2])) destination = url.href;
+      } catch (_) { /* Keep a malformed link visible as its original text. */ }
+      html += destination ? '<a href="' + escapeHtml(destination) + '">' + escapeHtml(match[1]) + '</a>' : escapeHtml(match[0]);
+      start = links.lastIndex;
+    }
+    html += escapeHtml(text.slice(start));
+    // Penpa uses %2C..%2F as its own delimiters, including inside URLs. Protect
+    // literal percent escapes until after that decoding by using HTML entities.
+    return html.replace(/%/g, "&#37;").replace(/\n/g, "%2D").replace(/,/g, "%2C")
       .replace(/&/g, "%2E").replace(/=/g, "%2F");
   }
 
@@ -148,7 +188,8 @@
       }
     }
     answer[4].sort();
-    // Do not put stored answers, replays, or full source URLs in the artwork/header.
+    // Keep answer metadata out of the artwork. The Source field intentionally
+    // preserves the original input link, which can itself contain puzzle data.
     const visiblePuzzle = {...puzzle, metadata: {...metadata}};
     delete visiblePuzzle.metaData;
     delete visiblePuzzle.solution;
@@ -164,7 +205,7 @@
       .map(name => ["sol_or_" + name, false]));
     const header = ["square", cols, rows, size, 0, 1, 1, artwork.width, artwork.height,
       center, center, 0, 0, 0, 0, "Title: " + headerText(metadata.title),
-      "Author: " + headerText(metadata.author), "https://sudokupad.app/", rulesText(metadata.rules),
+      "Author: " + headerText(metadata.author), sourceText(options.sourceUrl), rulesText(metadata.rules),
       "OFF", "false", deflate(JSON.stringify(bg))].join(",");
     const deltaCenters = centers.map((id, index) => index ? id - centers[index - 1] : id);
     const lines = [header, JSON.stringify([0, 0, 0, 0]),
@@ -184,7 +225,7 @@
 
   async function convertSudokuPadUrlDetailed(input, options = {}) {
     const decoded = await root.SudokuPadSource.decode(input, {fetch: options.fetch});
-    const result = convertPuzzle(decoded.puzzle, options);
+    const result = convertPuzzle(decoded.puzzle, {...options, sourceUrl: input});
     return {...result, format: decoded.format,
       warnings: [...new Set([...(decoded.warnings || []), ...result.warnings])]};
   }

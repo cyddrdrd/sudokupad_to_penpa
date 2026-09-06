@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0] - 2026-09-06
+
+- Record successful and failed conversions through a dedicated usage Worker.
+- Support creator-named SudokuPad links, including yttrio's puzzles.
+- Preserve clickable links in puzzle rules.
+- Use the original input link as the Penpa source.
+
+---
+
 ## [0.1.0] - 2026-09-06
 
 - Convert full and shortened SudokuPad puzzle links into Penpa+ links.
