@@ -132,7 +132,7 @@ test('UTF-8 title, author, rules and compression-looking text survive Penpa enco
   const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
   assert.equal(decoded.header[15], 'Title: Café%2C 数独 🧩 zN');
   assert.equal(decoded.header[16], 'Author: 作者%2C Zoë');
-  assert.equal(decoded.header[18], 'Use zN and "number".%2D规则: A%2FB %2E C%2CD');
+  assert.equal(decoded.header[18], 'Use zN and %2Equot;number%2Equot;.%2D规则: A%2FB %2Eamp; C%2CD');
 });
 
 test('legacy metadata cages and current metadata have deterministic precedence', () => {
@@ -226,7 +226,13 @@ test('percent-encoded embedded SudokuPad payloads preserve literal plus characte
   const data = 'scl' + app.LZString.compressToBase64(JSON.stringify(fixture({solution: '123456'})));
   const a = await app.convert('https://sudokupad.app/' + data);
   const b = await app.convert('https://sudokupad.app/' + encodeURIComponent(data));
-  assert.equal(a.url, b.url);
+  const decodedA = decodePenpa(a.url), decodedB = decodePenpa(b.url);
+  assert.equal(decodedA.header[17], 'https://sudokupad.app/' + data);
+  assert.equal(decodedB.header[17], 'https://sudokupad.app/' + encodeURIComponent(data));
+  assert.deepEqual(decodedA.header.filter((_, index) => index !== 17),
+    decodedB.header.filter((_, index) => index !== 17));
+  assert.deepEqual(decodedA.lines.slice(1), decodedB.lines.slice(1));
+  assert.deepEqual(decodedA.answer, decodedB.answer);
   assert.equal(app.network.length, 0);
 });
 
