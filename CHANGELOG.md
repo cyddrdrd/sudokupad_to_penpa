@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 ## [0.2.0] - 2026-09-06
 
-- Add usage logging with token-protected JSON and CSV views.
+- Add usage logging with numbered IDs, location/browser details, and token-protected JSON and CSV views.
 - Support creator-named SudokuPad links, including yttrio's puzzles.
 - Preserve clickable links in puzzle rules.
 - Use the original input link as the Penpa source.

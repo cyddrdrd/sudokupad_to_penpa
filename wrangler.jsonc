@@ -11,8 +11,8 @@
     "database_name": "sudokupad-to-penpa-usage",
     "database_id": "0c21c8b7-274e-4b2d-b10e-13a0ca17abba"
   }],
-  // Initialize with: npx wrangler d1 execute sudokupad-to-penpa-usage --remote --file=schema.sql
-  // Then publish with: npx wrangler deploy --env=""
+  // Initialize/update with: npx wrangler d1 migrations apply sudokupad-to-penpa-usage --remote --env=""
+  // Then publish with: npx wrangler deploy --keep-vars --env=""
   "env": {
     "development": {
       "vars": {"ALLOWED_ORIGINS": "http://localhost:8766,http://127.0.0.1:8766,http://localhost:8787,http://127.0.0.1:8787"},

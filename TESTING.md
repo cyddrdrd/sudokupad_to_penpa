@@ -4,7 +4,7 @@ Checked on 2026-09-06 against SudokuPad 0.611.0 and Penpa+ 3.2.4.
 
 ## Automated checks
 
-Run `npm test` (Node 18 or newer; no install needed). All 144 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, logging retries that do not interrupt conversion, and token-protected JSON/CSV views.
+Run `npm test` (Node 18 or newer; no install needed). All 149 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, logging retries that do not interrupt conversion, and token-protected JSON/CSV views, numbered IDs, and request location/browser metadata.
 
 ## 0.2.0 regression examples
 
@@ -20,6 +20,10 @@ These four puzzles passed in the actual Penpa+ 3.2.4 editor. Artwork and solving
 The short-link services were checked against live public responses. The repeatable editor checks use saved copies of those responses. The Worker passes Cloudflare's deployment build validation and a real local Worker/D1 integration run: success, failure, and blank-input events persisted, a retry created no duplicate, and CORS and validation rejected invalid requests.
 
 Live GitHub Pages conversions were also checked against the production D1 database: successful conversions with checking on and off, an invalid link, and a blank input all persisted with the expected fields. Both deployed log-viewing routes returned 401 without a viewing token.
+
+The metadata migration was verified against the backed-up production data and an isolated Wrangler D1 database. Existing values and IDs survived unchanged; new IDs are not reused, retries remain deduplicated, repeated migration application is a no-op, and an injected failure rolls back the entire migration.
+
+After deployment, live successful and failed conversions both received numbered IDs and populated country, region, city, colo, and User-Agent fields. The five migrated historical records were compared with the private backup and matched exactly; ADMIN_TOKEN remained configured.
 
 ## Real puzzles
 

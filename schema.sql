@@ -1,6 +1,7 @@
--- This schema is additive and safe to reapply to an existing database.
+-- Final schema snapshot for a new database. Deploy using the tracked migrations.
 CREATE TABLE IF NOT EXISTS conversion_events (
-  event_id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
   received_at TEXT NOT NULL,
   started_at TEXT NOT NULL,
   input_url TEXT NOT NULL,
@@ -10,6 +11,11 @@ CREATE TABLE IF NOT EXISTS conversion_events (
   input_format TEXT,
   error TEXT,
   version TEXT NOT NULL,
+  country TEXT,
+  region TEXT,
+  city TEXT,
+  colo TEXT,
+  user_agent TEXT,
   CHECK ((status = 'success' AND output_url IS NOT NULL AND error IS NULL)
       OR (status = 'error' AND output_url IS NULL AND error IS NOT NULL))
 );

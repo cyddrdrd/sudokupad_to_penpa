@@ -3,7 +3,8 @@
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_URL_LENGTH = 900000;
 const DEFAULT_ORIGINS = ["https://cyddrdrd.github.io"];
-const LOG_COLUMNS = ["event_id", "received_at", "started_at", "input_url", "output_url",
+const LOG_COLUMNS = ["id", "created_at", "country", "region", "city", "colo", "user_agent", "input_type", "used_clone",
+  "event_id", "received_at", "started_at", "input_url", "output_url",
   "no_solution_check", "status", "input_format", "error", "version"];
 
 function adminHeaders(contentType = "application/json; charset=utf-8") {
@@ -40,10 +41,12 @@ async function readLogs(request, env, url) {
   const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(500, Math.floor(requestedLimit))) : 100;
   try {
     const result = await env.DB.prepare(`
-      SELECT event_id, received_at, started_at, input_url, output_url,
+      SELECT id, received_at AS created_at, country, region, city, colo, user_agent,
+             input_format AS input_type, 0 AS used_clone,
+             event_id, received_at, started_at, input_url, output_url,
              no_solution_check, status, input_format, error, version
       FROM conversion_events
-      ORDER BY received_at DESC, rowid DESC
+      ORDER BY received_at DESC, id DESC
       LIMIT ?
     `).bind(limit).all();
     if (!result || result.success === false || !Array.isArray(result.results)) throw new Error("Storage failed.");
@@ -147,10 +150,20 @@ function validateEvent(value) {
   }
   if (value.status === "error" && (!error || outputUrl)) throw invalid("An error event requires an error and no output URL.");
   if (value.status === "success" && error) throw invalid("A successful event cannot contain an error.");
-  // Keep only these explicit fields. Cookies, IP addresses and browser headers
-  // are neither read nor included in the database record.
+  // Client payloads supply conversion fields only. Request metadata is added
+  // separately so payload fields cannot impersonate Cloudflare's location data.
   return {eventId, startedAt, inputUrl, outputUrl, noSolutionCheck: value.noSolutionCheck,
     status: value.status, inputFormat, error, version};
+}
+
+function requestMetadata(request) {
+  const text = (value, maximum) => typeof value === "string" ?
+    value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, maximum) || null : null;
+  // Cloudflare supplies these approximate locations. Never fall back to client
+  // payloads or location headers; local development may have no cf object.
+  const cf = request.cf || {};
+  return [text(cf.country, 8), text(cf.region, 128), text(cf.city, 128), text(cf.colo, 16),
+    text(request.headers.get("User-Agent"), 2048)];
 }
 
 export default {
@@ -189,12 +202,13 @@ export default {
       const result = await env.DB.prepare(`
         INSERT INTO conversion_events
           (event_id, received_at, started_at, input_url, output_url,
-           no_solution_check, status, input_format, error, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           no_solution_check, status, input_format, error, version,
+           country, region, city, colo, user_agent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_id) DO NOTHING
       `).bind(event.eventId, new Date().toISOString(), event.startedAt,
         event.inputUrl, event.outputUrl, Number(event.noSolutionCheck),
-        event.status, event.inputFormat, event.error, event.version).run();
+        event.status, event.inputFormat, event.error, event.version, ...requestMetadata(request)).run();
       if (result && result.success === false) throw new Error("Storage failed.");
       return reply(201, {ok: true}, origin);
     } catch {
