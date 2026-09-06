@@ -30,7 +30,9 @@ function database() {
   const DB = {
     prepare(sql) {
       assert.match(sql, /INSERT INTO conversion_events/);
-      assert.equal((sql.match(/\?/g) || []).length, 10, 'Values must use SQL parameters');
+      assert.equal((sql.match(/\?/g) || []).length, 15, 'Values must use SQL parameters');
+      assert.match(sql, /country, region, city, colo, user_agent\)/);
+      assert.doesNotMatch(sql, /\(id,/);
       assert.match(sql, /ON CONFLICT\(event_id\) DO NOTHING/);
       return {bind(...values) {
         return {async run() {
@@ -45,9 +47,12 @@ function database() {
 }
 
 function request(value, options = {}) {
-  return new Request(endpoint, {method: 'POST',
+  const {cf, ...init} = options;
+  const result = new Request(endpoint, {method: 'POST',
     headers: {'Content-Type': 'application/json', Origin: origin},
-    body: JSON.stringify(value), ...options});
+    body: JSON.stringify(value), ...init});
+  if (cf !== undefined) Object.defineProperty(result, 'cf', {value: cf});
+  return result;
 }
 
 async function run(value, options = {}, env = {}) {
@@ -66,7 +71,7 @@ test('successful conversions persist URLs, options, format and both timestamps',
   const row = db.rows.get(input.eventId);
   assert.ok(Date.parse(row[1]) >= before && Date.parse(row[1]) <= Date.now());
   assert.deepEqual(row.slice(2), [input.startedAt, input.inputUrl, input.outputUrl,
-    0, 'success', 'scl', null, '0.2.0']);
+    0, 'success', 'scl', null, '0.2.0', null, null, null, null, null]);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.equal(response.headers.get('Access-Control-Allow-Credentials'), null);
@@ -78,7 +83,54 @@ test('failed and blank-input attempts are stored without a made-up output link',
   const {response, db} = await run(input);
   assert.equal(response.status, 201);
   assert.deepEqual(db.rows.get(input.eventId).slice(2), [input.startedAt, '', null,
-    1, 'error', null, input.error, '0.2.0']);
+    1, 'error', null, input.error, '0.2.0', null, null, null, null, null]);
+});
+
+for (const status of ['success', 'error']) {
+  test(status + ' attempts store Cloudflare location and the actual User-Agent header', async () => {
+    const input = event(status === 'error' ? {status, outputUrl: null, error: 'Conversion failed.'} : {});
+    const {response, db} = await run(input, {cf: {
+      country: 'CH', region: 'Vaud', city: 'Lausanne', colo: 'ZRH',
+      latitude: '46.5197', longitude: '6.6323'
+    }, headers: {'Content-Type': 'application/json', Origin: origin, 'User-Agent': 'Browser/123.4'}});
+    assert.equal(response.status, 201);
+    assert.deepEqual(db.rows.get(input.eventId).slice(10), ['CH', 'Vaud', 'Lausanne', 'ZRH', 'Browser/123.4']);
+    assert.ok(!JSON.stringify([...db.rows.values()]).includes('46.5197'));
+  });
+}
+
+test('location and browser fields in the client payload cannot override request metadata', async () => {
+  const input = event({id: 999, created_at: 'fake', country: 'XX', region: 'Fake', city: 'Fake', colo: 'XXX',
+    user_agent: 'fake-browser', cf: {country: 'XX'}, input_type: 'fake', used_clone: 1});
+  const {response, db} = await run(input, {cf: {country: 'CH', region: 'Vaud', city: 'Lausanne', colo: 'ZRH'},
+    headers: {'Content-Type': 'application/json', Origin: origin, 'User-Agent': 'Actual/1.0', 'CF-IPCountry': 'XX'}});
+  assert.equal(response.status, 201);
+  assert.deepEqual(db.rows.get(input.eventId).slice(10), ['CH', 'Vaud', 'Lausanne', 'ZRH', 'Actual/1.0']);
+  assert.ok(!JSON.stringify([...db.rows.values()]).includes('fake'));
+});
+
+test('missing Cloudflare metadata stays null instead of trusting location headers or payload fields', async () => {
+  for (const cf of [undefined, null, {}, {country: '', region: null, city: 123, colo: '   '}]) {
+    const input = event({country: 'XX', user_agent: 'fake-browser'});
+    const {response, db} = await run(input, {cf, headers: {
+      'Content-Type': 'application/json', Origin: origin, 'CF-IPCountry': 'XX', 'X-City': 'Fake'
+    }});
+    assert.equal(response.status, 201);
+    assert.deepEqual(db.rows.get(input.eventId).slice(10), [null, null, null, null, null]);
+  }
+});
+
+test('request metadata is bounded and control characters cannot enter a record', async () => {
+  const input = event();
+  const {response, db} = await run(input, {cf: {
+    country: '  CH\u0000\n  ', region: 'r'.repeat(200), city: 'Lausanne\t', colo: 'ZRH\u007f'
+  }, headers: {'Content-Type': 'application/json', Origin: origin, 'User-Agent': '\tAgent/1.0\t' + 'x'.repeat(3000)}});
+  assert.equal(response.status, 201);
+  const [country, region, city, colo, userAgent] = db.rows.get(input.eventId).slice(10);
+  assert.deepEqual([country, region, city, colo], ['CH', 'r'.repeat(128), 'Lausanne', 'ZRH']);
+  assert.equal(userAgent.length, 2048);
+  assert.ok(userAgent.startsWith('Agent/1.0'));
+  assert.doesNotMatch(userAgent, /[\u0000-\u001f\u007f]/);
 });
 
 test('empty optional fields are normalized to database nulls', async () => {
@@ -107,7 +159,7 @@ test('SQL-looking input stays a bound value and unrequested personal fields are 
   assert.equal(response.status, 201);
   const row = [...db.rows.values()][0];
   assert.equal(row[3], input.inputUrl);
-  assert.equal(row.length, 10);
+  assert.equal(row.length, 15);
   assert.ok(!JSON.stringify(row).includes('private'));
   assert.ok(!JSON.stringify(row).includes('192.0.2.'));
   assert.ok(!JSON.stringify(row).includes('secret'));
@@ -211,11 +263,14 @@ test('storage errors return a retryable failure without exposing database intern
 });
 
 const adminToken = 'test-only-admin-token';
-const logColumns = ['event_id', 'received_at', 'started_at', 'input_url', 'output_url',
+const logColumns = ['id', 'created_at', 'country', 'region', 'city', 'colo', 'user_agent', 'input_type', 'used_clone',
+  'event_id', 'received_at', 'started_at', 'input_url', 'output_url',
   'no_solution_check', 'status', 'input_format', 'error', 'version'];
 
 function logRow(overrides = {}) {
-  return {event_id: 'test-event-00000001', received_at: '2026-09-06T15:24:00.000Z',
+  return {id: 61, created_at: '2026-09-06T15:24:00.000Z', country: 'CH', region: 'Vaud', city: 'Lausanne',
+    colo: 'ZRH', user_agent: 'Browser/123.4', input_type: 'scl', used_clone: 0,
+    event_id: 'test-event-00000001', received_at: '2026-09-06T15:24:00.000Z',
     started_at: '2026-09-06T15:23:45.123Z', input_url: event().inputUrl,
     output_url: event().outputUrl, no_solution_check: 0, status: 'success',
     input_format: 'scl', error: null, version: '0.2.0', ...overrides};
@@ -226,8 +281,10 @@ function adminDatabase(rows = [logRow()]) {
   return {limits, DB: {prepare(sql) {
     const selected = /SELECT\s+([\s\S]+?)\s+FROM conversion_events/.exec(sql);
     assert.ok(selected, 'Read from the usage table with explicit columns');
-    assert.deepEqual(selected[1].split(',').map(column => column.trim()), logColumns);
-    assert.match(sql, /ORDER BY received_at DESC, rowid DESC/);
+    assert.deepEqual(selected[1].split(',').map(column => column.trim()), logColumns.map(column => ({
+      created_at: 'received_at AS created_at', input_type: 'input_format AS input_type', used_clone: '0 AS used_clone'
+    }[column] || column)));
+    assert.match(sql, /ORDER BY received_at DESC, id DESC/);
     assert.match(sql, /LIMIT \?/);
     assert.equal((sql.match(/\?/g) || []).length, 1);
     return {bind(...values) {
@@ -254,7 +311,8 @@ function checkAdminHeaders(response) {
 
 test('the private JSON viewer works as a top-level navigation and returns the stored fields', async () => {
   const {default: worker} = await workerPromise;
-  const rows = [logRow(), logRow({event_id: 'test-event-00000002', received_at: '2026-09-06T15:20:00.000Z',
+  const rows = [logRow(), logRow({id: 60, event_id: 'test-event-00000002', received_at: '2026-09-06T15:20:00.000Z',
+    created_at: '2026-09-06T15:20:00.000Z', country: null, region: null, city: null, colo: null, user_agent: null, input_type: null,
     input_url: '', output_url: null, no_solution_check: 1, status: 'error', input_format: null,
     error: 'Please paste a SudokuPad link first.'})];
   const db = adminDatabase(rows);
@@ -337,6 +395,7 @@ test('CSV exports preserve commas, quotes, line breaks, nulls and download metad
   assert.equal(response.headers.get('Content-Disposition'), 'attachment; filename=sudokupad_to_penpa_logs.csv');
   const text = await response.text();
   assert.ok(text.startsWith(logColumns.join(',') + '\r\n'));
+  assert.ok(text.includes('"61","2026-09-06T15:24:00.000Z","CH","Vaud","Lausanne","ZRH","Browser/123.4","scl","0"'));
   assert.ok(text.includes('"https://sudokupad.app/puzzle?text=""hello, world"""'));
   assert.ok(text.includes(',"","0","error",'));
   assert.ok(text.includes('"Line 1\nLine 2, ""quoted"""'));
