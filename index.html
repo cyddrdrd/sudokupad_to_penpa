@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SudokuPad to Penpa+ 0.1.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <script src="vendor/lz-string.min.js"></script>
+  <script src="vendor/pako.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 20px;
+      line-height: 1.5;
+      color: #222;
+    }
+
+    h1 {
+      margin-bottom: 0.2em;
+    }
+
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      resize: vertical;
+    }
+
+    button {
+      margin-top: 12px;
+      margin-right: 8px;
+      padding: 9px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #24292f;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #444c56;
+    }
+
+    .secondary {
+      background: #9F9F5F;
+    }
+
+    .status {
+      margin-top: 12px;
+      font-weight: 600;
+    }
+
+    .error {
+      color: #b00020;
+    }
+
+    .success {
+      color: #0969da;
+    }
+
+    .note {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      padding: 12px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+
+    label {
+      font-weight: 600;
+      display: block;
+      margin-top: 18px;
+      margin-bottom: 6px;
+    }
+
+    .option {
+      display: inline-block;
+      margin: 12px 0 0;
+      font-weight: 400;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>SudokuPad to Penpa+ 0.1.0</h1>
+
+  <p>
+    Convert a SudokuPad link into a Penpa+ link. Chrome or Firefox is recommended.
+  </p>
+
+  <label for="inputUrl"><b>SudokuPad</b> or shortened URL</label>
+  <textarea id="inputUrl" rows="8" placeholder="https:// or http://"></textarea>
+
+  <button id="convertOpenButton">Convert and Open</button>
+  <button id="convertButton">Convert Only</button>
+  <label class="option" for="noSolutionCheck"><input id="noSolutionCheck" type="checkbox"> No solution check</label>
+
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <label for="outputUrl">Generated URL</label>
+  <textarea id="outputUrl" rows="8" placeholder=" " readonly></textarea>
+
+  <button id="copyButton" class="secondary">Copy URL to Clipboard</button>
+
+<script src="vendor/fpuzzlesdecoder.js"></script>
+<script src="source.js?v=0.1.0"></script>
+<script src="artwork.js?v=0.1.0"></script>
+<script src="converter.js?v=0.1.0"></script>
+<script src="page.js?v=0.1.0"></script>
+</body>
+</html>

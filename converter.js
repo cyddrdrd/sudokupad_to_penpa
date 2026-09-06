@@ -1,0 +1,198 @@
+/* SudokuPad to Penpa+: puzzle assembly and Penpa 3.2.4 solve-link encoding. */
+(function (root) {
+  "use strict";
+
+  const PENPA_BASE = "https://swaroopg92.github.io/penpa-edit/";
+  const CHECK_OPTIONS = ["surface_exact", "surface", "number", "loopline_exact", "loopline",
+    "ignoreloopline", "loopedge_exact", "loopedge", "ignoreborder", "wall", "square",
+    "circle", "tri", "arrow", "math", "battleship", "tent", "star", "akari", "mine"];
+  // Penpa's ordered wire-format substitutions. Escape literal z first.
+  const COMPRESS_SUB = [["z", "zZ"], ...[
+    ["qa", "9"], ["pu_q", "Q"], ["pu_a", "A"], ["grid", "G"],
+    ["edit_mode", "M"], ["surface", "S"], ["line", "L"], ["lineE", "E"],
+    ["wall", "W"], ["cage", "C"], ["number", "N"], ["symbol", "Y"],
+    ["special", "P"], ["board", "B"], ["command_redo", "R"], ["command_undo", "U"],
+    ["command_replay", "8"], ["numberS", "1"], ["freeline", "F"], ["freelineE", "2"],
+    ["thermo", "T"], ["arrows", "3"], ["direction", "D"], ["squareframe", "0"],
+    ["polygon", "5"], ["deletelineE", "4"], ["killercages", "6"],
+    ["nobulbthermo", "7"], ["__a", "_"]
+  ].map(([key, token]) => [JSON.stringify(key), "z" + token]), ["null", "zO"]];
+
+  function bytesToBase64(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+  }
+
+  function deflate(text) {
+    return bytesToBase64(root.pako.deflateRaw(new TextEncoder().encode(text), {level: 9}));
+  }
+
+  function emptyLayer() {
+    const layer = {};
+    for (const key of ["command_redo", "command_undo", "command_replay"]) layer[key] = {__a: []};
+    for (const key of ["surface", "number", "numberS", "symbol", "line", "lineE", "wall",
+      "cage", "deletelineE", "freeline", "freelineE"]) layer[key] = {};
+    for (const key of ["thermo", "arrows", "direction", "squareframe", "polygon",
+      "killercages", "nobulbthermo"]) layer[key] = [];
+    return layer;
+  }
+
+  function penpaMode() {
+    const part = color => ({edit_mode: "number", surface: ["", 1], multicolor: ["", 1],
+      line: ["1", color === 1 ? 2 : 3], lineE: ["1", color === 1 ? 2 : 3],
+      wall: ["", color === 1 ? 2 : 3], cage: ["1", 10], number: ["1", color],
+      symbol: ["circle_L", 1], special: ["thermo", ""], board: ["", ""],
+      move: ["1", ""], combi: ["battleship", 3], sudoku: ["1", color === 1 ? 1 : 9]});
+    // The artwork includes the grid so that white clue backgrounds mask it correctly.
+    return {qa: "pu_a", grid: ["3", "2", "2"], pu_q: part(1), pu_a: part(2)};
+  }
+
+  function metadataOf(puzzle) {
+    const metadata = Object.create(null);
+    for (const key of ["title", "author", "rules", "solution"]) {
+      if (puzzle[key] !== undefined) metadata[key] = puzzle[key];
+    }
+    for (const cage of puzzle.cages || []) {
+      if (!cage || (cage.cells || []).some(Array.isArray)) continue;
+      const match = String(cage.value ?? "").match(/^(.+?):\s*([\s\S]+)/m);
+      if (match) metadata[match[1]] = match[2];
+    }
+    for (const source of [puzzle.metaData, puzzle.metadata]) {
+      if (source && typeof source === "object" && !Array.isArray(source)) {
+        for (const [key, value] of Object.entries(source)) metadata[key] = value;
+      }
+    }
+    return metadata;
+  }
+
+  function dimensions(puzzle) {
+    if (!Array.isArray(puzzle.cells) || !puzzle.cells.length ||
+      !puzzle.cells.every(row => Array.isArray(row) && row.length)) {
+      throw new Error("The SudokuPad puzzle has no valid cell grid.");
+    }
+    const rows = puzzle.cells.length;
+    const cols = Math.max(...puzzle.cells.map(row => row.length));
+    if (rows > 100 || cols > 100) throw new Error("Penpa supports grids up to 100 × 100 cells.");
+    if (!puzzle.cells.every(row => row.length === cols)) {
+      throw new Error("Rows with different lengths cannot yet be converted.");
+    }
+    return {rows, cols};
+  }
+
+  function solutionCells(solution, count) {
+    let values;
+    if (Array.isArray(solution)) {
+      values = solution.some(Array.isArray) ? solution.flat() : solution.slice();
+    } else if (typeof solution === "string" || typeof solution === "number") {
+      const text = String(solution).trim();
+      values = text.includes(",") ? text.split(",").map(value => value.trim()) : Array.from(text);
+    } else {
+      throw new Error("The stored answer has an unsupported format. Tick No solution check to convert the puzzle without it.");
+    }
+    if (values.length !== count) {
+      throw new Error("The stored answer does not match the grid size. Tick No solution check to convert without it.");
+    }
+    return values.map(value => {
+      if (value === "?") {
+        throw new Error("Penpa cannot reproduce this puzzle's partial answer check. Tick No solution check to convert without it.");
+      }
+      if (value === "." || value === "" || value === null) return "";
+      if ((typeof value !== "string" && typeof value !== "number") ||
+        !/^(?:\d+|[A-Za-z]+)$/.test(String(value))) {
+        throw new Error("The stored answer contains an unsupported cell value. Tick No solution check to convert without it.");
+      }
+      return String(value);
+    });
+  }
+
+  function headerText(value) {
+    return String(value ?? "").replace(/[\r\n]/g, " ").replace(/,/g, "%2C");
+  }
+
+  function rulesText(value) {
+    return (Array.isArray(value) ? value.join("\n") : String(value ?? ""))
+      .replace(/\r\n?/g, "\n").replace(/\n/g, "%2D").replace(/,/g, "%2C")
+      .replace(/&/g, "%2E").replace(/=/g, "%2F");
+  }
+
+  function convertPuzzle(puzzle, options = {}) {
+    if (!puzzle || typeof puzzle !== "object") throw new Error("Invalid SudokuPad puzzle.");
+    const {rows, cols} = dimensions(puzzle);
+    const metadata = metadataOf(puzzle);
+    const hasSolution = metadata.solution !== undefined && metadata.solution !== null && metadata.solution !== "";
+    const includedSolution = hasSolution && !options.noSolutionCheck;
+    const solution = includedSolution ? solutionCells(metadata.solution, rows * cols) : null;
+    const size = 38, stride = cols + 4, pointCount = stride * (rows + 4);
+    const cellId = (r, c) => (r + 2) * stride + c + 2;
+    const band = cols % 2 ? (rows % 2 ? 0 : 2) : (rows % 2 ? 3 : 1);
+    const center = Math.floor((cols + 3) / 2) + stride * Math.floor((rows + 3) / 2) + band * pointCount;
+    const question = emptyLayer(), colors = emptyLayer(), centers = [], answer = [[], [], [], [], [], []];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const id = cellId(r, c), cell = puzzle.cells[r][c];
+        if (!cell || typeof cell !== "object" || Array.isArray(cell)) throw new Error("Invalid cell data in the SudokuPad puzzle.");
+        centers.push(id);
+        const given = cell.value;
+        if (given !== undefined && given !== null && given !== "") {
+          if (!["string", "number"].includes(typeof given)) throw new Error("A given has an unsupported value.");
+          question.number[id] = [String(given), 1, "1"];
+          if (solution && solution[r * cols + c] !== String(given)) {
+            throw new Error("A given conflicts with the stored answer. Tick No solution check to convert without it.");
+          }
+        } else if (solution && solution[r * cols + c] !== "") {
+          answer[4].push(id + "," + solution[r * cols + c]);
+        }
+      }
+    }
+    answer[4].sort();
+    // Do not put stored answers, replays, or full source URLs in the artwork/header.
+    const visiblePuzzle = {...puzzle, metadata: {...metadata}};
+    delete visiblePuzzle.metaData;
+    delete visiblePuzzle.solution;
+    delete visiblePuzzle.metadata.solution;
+    visiblePuzzle.cages = (puzzle.cages || []).filter(cage => cage && (cage.cells || []).some(Array.isArray));
+    const artwork = root.SudokuPadArtwork.render(visiblePuzzle, {cellSize: size});
+    const bg = {url: "data:image/svg+xml;base64," + bytesToBase64(new TextEncoder().encode(artwork.svg)),
+      x: 0, y: 0, width: artwork.width, height: artwork.height,
+      foreground: false, opacity: 100, mask_white: false};
+    const mode = penpaMode();
+    const andSettings = Object.fromEntries(CHECK_OPTIONS.map(name => ["sol_" + name, includedSolution && name === "number"]));
+    const orSettings = Object.fromEntries(CHECK_OPTIONS.filter(name => !["ignoreloopline", "ignoreborder"].includes(name))
+      .map(name => ["sol_or_" + name, false]));
+    const header = ["square", cols, rows, size, 0, 1, 1, artwork.width, artwork.height,
+      center, center, 0, 0, 0, 0, "Title: " + headerText(metadata.title),
+      "Author: " + headerText(metadata.author), "https://sudokupad.app/", rulesText(metadata.rules),
+      "OFF", "false", deflate(JSON.stringify(bg))].join(",");
+    const deltaCenters = centers.map((id, index) => index ? id - centers[index - 1] : id);
+    const lines = [header, JSON.stringify([0, 0, 0, 0]),
+      JSON.stringify(mode.grid) + '~"number"~' + JSON.stringify(mode.pu_a.number),
+      JSON.stringify(question), "", JSON.stringify(deltaCenters),
+      JSON.stringify(["number", "sudoku", "surface", "symbol", "line", "lineE"]),
+      JSON.stringify(andSettings), '"x"', '"x"', "[3,2,4]", JSON.stringify(mode),
+      '"x"', "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
+    let text = lines.join("\n");
+    for (const [plain, short] of COMPRESS_SUB) text = text.split(plain).join(short);
+    // Penpa reads Base64 literally; its loader does not URI-decode these fields.
+    const url = PENPA_BASE + "#m=solve&p=" + deflate(text) +
+      (includedSolution ? "&a=" + deflate(JSON.stringify(answer)) : "");
+    return {url, hasSolution, includedSolution, warnings: artwork.warnings || [], rows, cols};
+  }
+
+  async function convertSudokuPadUrlDetailed(input, options = {}) {
+    const decoded = await root.SudokuPadSource.decode(input, {fetch: options.fetch});
+    const result = convertPuzzle(decoded.puzzle, options);
+    return {...result, format: decoded.format,
+      warnings: [...new Set([...(decoded.warnings || []), ...result.warnings])]};
+  }
+
+  async function convertSudokuPadUrl(input, options) {
+    return (await convertSudokuPadUrlDetailed(input, options)).url;
+  }
+
+  root.SudokuPadToPenpa = {convertPuzzle, metadataOf, solutionCells};
+  root.convertSudokuPadUrlDetailed = convertSudokuPadUrlDetailed;
+  root.convertSudokuPadUrl = convertSudokuPadUrl;
+})(globalThis);
