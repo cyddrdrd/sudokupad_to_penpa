@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.3] - 2026-09-09
+
+- Keep octagons, grid borders, and all clue artwork above Surface colours, with solving marks above the artwork.
+- Allow shading and number entry throughout the outside clue area.
+- Keep artwork aligned when resizing the grid.
+- Open converted puzzles in the project's Penpa+ viewer.
+
+---
+
 ## [0.2.2] - 2026-09-09
 
 - Keep supported coloured lines and outer grid borders visible above Surface colours.

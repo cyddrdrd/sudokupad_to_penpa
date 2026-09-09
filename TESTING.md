@@ -1,10 +1,27 @@
-# Testing 0.2.2
+# Testing 0.2.3
 
-Checked on 2026-09-09 against SudokuPad 0.611.0 and Penpa+ 3.2.4.
+Checked on 2026-09-09 against SudokuPad 0.611.0 and the project-hosted Penpa+ 3.2.4.
 
 ## Automated checks
 
-Run `npm test` (Node 18 or newer; no install needed). All 197 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, logging retries that do not interrupt conversion, and token-protected JSON/CSV views, numbered IDs, and request location/browser metadata.
+Run `npm test` (Node 18 or newer; no install needed). All 223 tests pass. The suite checks format decoding, answer serialization, safe input handling, rules and source links, page behavior, usage logging, and artwork. Independent pinned Penpa methods verify real point generation, drawing order, display scaling, structural row/column resizing, and answer checking.
+
+## 0.2.3 Surface, outside clues and Resize
+
+The hosted viewer draws the complete source artwork after both Surface layers and before solving numbers, lines and shapes. Given cell colours use the native question Surface layer so solver shading can cover them. Opaque artwork pixels are compared against the original imported image after actual Penpa Surface mouse drags.
+
+- [Wreath](https://sudokupad.app/zyjs2yh4bp): all nine octagons, twenty coloured lines, and the complete grid remain above blue, yellow, purple and dark grey shading. All 113,603 opaque artwork pixels match. An entered digit is visible above an octagon.
+- [Japanese Nurikabe (2)](https://sudokupad.app/wtddstx0cx?setting-conflictchecker=0): all 130 labels remain visible; all 100 outside clue cells accept Surface and Number input. All 168,425 opaque artwork pixels match. The 16 × 16 solving grid retains normal right and bottom margins within its 874 × 874 canvas.
+- Both puzzles and a given-colour fixture pass display Resize from 38 to 26, 50 and back to 38. Artwork stays aligned with native cells, and opaque pixels remain unchanged within rendering tolerance.
+- Outside number annotations do not invalidate an otherwise correct stored grid answer; wrong digits inside the grid still fail.
+- Given cell colours can be covered by Surface without covering clue artwork. Transparent cell colours never become dark fills.
+- Structural resize tests exercise adding and removing rows/columns on every side, repeated cropping beyond the original artwork anchor, and preservation of given, Surface and answer positions.
+
+All ten browser drawing cases pass, including both Wreath links and five decorated Marty Sears/Juggler puzzles: Krop Circles, Circles and Dots, Factory Farming, Area 51, and Oyster. They retain exact SVG geometry, masks, drawing order, text, and native given/entered digits. Correct answers pass, changed digits fail, and the answer-check opt-out works.
+
+The layer and resize fixes require the project-hosted Penpa viewer. Previously generated links need to be converted again. Artwork remains an embedded image and cannot be edited as individual native objects. Rotation is not covered by this release. Equal-colour clues and shading have normal contrast limitations; placing black text above black shading cannot make it legible.
+
+The following sections record earlier releases and their then-current limitations.
 
 ## 0.2.2 Surface regressions
 

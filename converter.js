@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
 
-  const PENPA_BASE = "https://swaroopg92.github.io/penpa-edit/";
+  const PENPA_BASE = "https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/";
   const CHECK_OPTIONS = ["surface_exact", "surface", "number", "loopline_exact", "loopline",
     "ignoreloopline", "loopedge_exact", "loopedge", "ignoreborder", "wall", "square",
     "circle", "tri", "arrow", "math", "battleship", "tent", "star", "akari", "mine"];
@@ -40,64 +40,15 @@
     return layer;
   }
 
-  const enabled = value => [true, 1, "1", "true"].includes(value);
-
   function penpaMode(puzzle) {
     const part = color => ({edit_mode: "number", surface: ["", 1], multicolor: ["", 1],
       line: ["1", color === 1 ? 2 : 3], lineE: ["1", color === 1 ? 2 : 3],
       wall: ["", color === 1 ? 2 : 3], cage: ["1", 10], number: ["1", color],
       symbol: ["circle_L", 1], special: ["thermo", ""], board: ["", ""],
       move: ["1", ""], combi: ["battleship", 3], sudoku: ["1", color === 1 ? 1 : 9]});
-    // Native grid lines are redrawn after Surface fills in Penpa. Only the
-    // portions covered by artwork stay in the background image.
-    const gridStyle = enabled(puzzle.settings?.nogrid) ? "3" : enabled(puzzle.settings?.dashedgrid) ? "2" : "1";
-    return {qa: "pu_a", grid: [gridStyle, "2", "2"], pu_q: part(1), pu_a: part(2)};
-  }
-
-  function addNativeGrid(puzzle, artwork, question, rows, cols) {
-    const stride = cols + 4, pointCount = stride * (rows + 4);
-    const vertex = (r, c) => pointCount + (r + 1) * stride + c + 1;
-    const edgeKey = (r, c, rr, cc) => {
-      const a = vertex(r, c), b = vertex(rr, cc);
-      return Math.min(a, b) + "," + Math.max(a, b);
-    };
-    const occluded = (r, c, rr, cc) => root.SudokuPadArtwork.gridEdgeOccluded(
-      artwork.gridOcclusions || [], c * 64, r * 64, cc * 64, rr * 64);
-    // A mask can hide only part of an edge. Keep that whole edge in the image
-    // so a native line cannot cut through its white fill or decorative text.
-    if (!enabled(puzzle.settings?.nogrid)) {
-      for (let r = 0; r <= rows; r++) for (let c = 0; c < cols; c++) {
-        if (occluded(r, c, r, c + 1)) question.deletelineE[edgeKey(r, c, r, c + 1)] = 1;
-      }
-      for (let r = 0; r < rows; r++) for (let c = 0; c <= cols; c++) {
-        if (occluded(r, c, r + 1, c)) question.deletelineE[edgeKey(r, c, r + 1, c)] = 1;
-      }
-    }
-    const boundaries = [
-      ...(puzzle.regions || []).map(cells => ({cells})),
-      ...(puzzle.cages || []).filter(cage => cage && cage.style === "box" && !cage.hidden)
-    ];
-    for (const boundary of boundaries) {
-      const color = String(boundary.borderColor ?? boundary.outlineC ?? "#000000").toLowerCase();
-      // Custom colored box borders remain in the image: Penpa's optional
-      // custom-color preference must not turn them black on another device.
-      if (!["#000000", "#000", "black"].includes(color)) continue;
-      const cells = new Set((boundary.cells || []).filter(Array.isArray).map(([r, c]) => r + "," + c));
-      const add = (r, c, rr, cc) => {
-        if (Math.min(r, rr) < 0 || Math.max(r, rr) > rows ||
-          Math.min(c, cc) < 0 || Math.max(c, cc) > cols || occluded(r, c, rr, cc)) return;
-        // Penpa style 4 is a two-pixel black boundary, matching the converted
-        // three-source-pixel region outline at the 38/64 cell scale.
-        question.lineE[edgeKey(r, c, rr, cc)] = 4;
-      };
-      for (const cell of cells) {
-        const [r, c] = cell.split(",").map(Number);
-        if (!cells.has((r - 1) + "," + c)) add(r, c, r, c + 1);
-        if (!cells.has(r + "," + (c + 1))) add(r, c + 1, r + 1, c + 1);
-        if (!cells.has((r + 1) + "," + c)) add(r + 1, c, r + 1, c + 1);
-        if (!cells.has(r + "," + (c - 1))) add(r, c, r + 1, c);
-      }
-    }
+    // The imported image keeps the original grid, masks and exact clue geometry.
+    // The bundled viewer draws it after Surface and before solving marks.
+    return {qa: "pu_a", grid: ["3", "2", "2"], pu_q: part(1), pu_a: part(2)};
   }
 
   function metadataOf(puzzle) {
@@ -215,8 +166,17 @@
     const hasSolution = metadata.solution !== undefined && metadata.solution !== null && metadata.solution !== "";
     const includedSolution = hasSolution && !options.noSolutionCheck;
     const solution = includedSolution ? solutionCells(metadata.solution, rows * cols) : null;
-    const size = 38, stride = cols + 4, pointCount = stride * (rows + 4);
-    const cellId = (r, c) => (r + 2) * stride + c + 2;
+    const size = 38;
+    // Keep answer metadata out of the artwork. The Source field intentionally
+    // preserves the original input link, which can itself contain puzzle data.
+    const visiblePuzzle = {...puzzle, metadata: {...metadata}};
+    delete visiblePuzzle.metaData;
+    delete visiblePuzzle.solution;
+    delete visiblePuzzle.metadata.solution;
+    visiblePuzzle.cages = (puzzle.cages || []).filter(cage => cage && (cage.cells || []).some(Array.isArray));
+    const artwork = root.SudokuPadArtwork.render(visiblePuzzle, {cellSize: size, omitCellColors: true});
+    const layout = root.SudokuPadLayout.create(puzzle, {bounds: artwork.interactionBounds});
+    const cellId = layout.cellId;
     const question = emptyLayer(), colors = emptyLayer(), centers = [], answer = [[], [], [], [], [], []];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -236,52 +196,36 @@
       }
     }
     answer[4].sort();
-    // Keep answer metadata out of the artwork. The Source field intentionally
-    // preserves the original input link, which can itself contain puzzle data.
-    const visiblePuzzle = {...puzzle, metadata: {...metadata}};
-    delete visiblePuzzle.metaData;
-    delete visiblePuzzle.solution;
-    delete visiblePuzzle.metadata.solution;
-    visiblePuzzle.cages = (puzzle.cages || []).filter(cage => cage && (cage.cells || []).some(Array.isArray));
-    const clues = root.SudokuPadNativeClues.planClues(visiblePuzzle, {cellSize: size});
-    const renderOptions = {cellSize: size, nativeGrid: true,
-      nativeOverlayText: new Set(clues.overlayIndices), nativeUnderlayText: new Set(clues.underlayIndices)};
-    let artwork = root.SudokuPadArtwork.render(visiblePuzzle, renderOptions);
-    const nativeLines = root.SudokuPadNative.planLines(visiblePuzzle,
-      {cellSize: size, occlusions: artwork.lineOcclusions});
-    if (nativeLines.lineIndices.size) {
-      artwork = root.SudokuPadArtwork.render(visiblePuzzle, {...renderOptions, nativeLineIndices: nativeLines.lineIndices});
+    // Given cell colours belong beneath solver shading. Everything else stays
+    // together in the exact source drawing so masks and clue order are intact.
+    for (const [r, c, color] of artwork.cellColors) {
+      question.surface[cellId(r, c)] = 1;
+      colors.surface[cellId(r, c)] = color;
     }
-    addNativeGrid(visiblePuzzle, artwork, question, rows, cols);
-    Object.assign(question.line, nativeLines.line);
-    Object.assign(colors.line, nativeLines.colors);
-    Object.assign(question.number, clues.question.number);
-    Object.assign(question.numberS, clues.question.numberS);
-    // Penpa's four point bands provide every half-cell coordinate. Align its
-    // native cells with the artwork after fitting asymmetric outside clues.
-    const centerX = artwork.centerX, centerY = artwork.centerY;
-    const halfX = !Number.isInteger(centerX), halfY = !Number.isInteger(centerY);
-    const band = halfX ? (halfY ? 0 : 2) : (halfY ? 3 : 1);
-    const center = Math.floor(centerX + 1.5) + stride * Math.floor(centerY + 1.5) + band * pointCount;
+    const center = layout.centerId(artwork.centerX, artwork.centerY);
     const bg = {url: "data:image/svg+xml;base64," + bytesToBase64(new TextEncoder().encode(artwork.svg)),
       x: 0, y: 0, width: artwork.width, height: artwork.height,
-      foreground: false, opacity: 100, mask_white: false};
+      foreground: false, opacity: 100, mask_white: false,
+      sudokupad_artwork: {version: 1, anchor: cellId(0, 0),
+        offsetX: -(artwork.originX + size / 2) / size,
+        offsetY: -(artwork.originY + size / 2) / size,
+        widthCells: artwork.width / size, heightCells: artwork.height / size}};
     const mode = penpaMode(puzzle);
     const andSettings = Object.fromEntries(CHECK_OPTIONS.map(name => ["sol_" + name, includedSolution && name === "number"]));
     const orSettings = Object.fromEntries(CHECK_OPTIONS.filter(name => !["ignoreloopline", "ignoreborder"].includes(name))
       .map(name => ["sol_or_" + name, false]));
-    const header = ["square", cols, rows, size, 0, 1, 1, artwork.width, artwork.height,
+    const header = ["square", layout.cols, layout.rows, size, 0, 1, 1, artwork.width, artwork.height,
       center, center, 0, 0, 0, 0, "Title: " + headerText(metadata.title),
       "Author: " + headerText(metadata.author), sourceText(options.sourceUrl), rulesText(metadata.rules),
       "OFF", "false", deflate(JSON.stringify(bg))].join(",");
     const deltaCenters = centers.map((id, index) => index ? id - centers[index - 1] : id);
-    const lines = [header, JSON.stringify([0, 0, 0, 0]),
+    const lines = [header, JSON.stringify(layout.space),
       JSON.stringify(mode.grid) + '~"number"~' + JSON.stringify(mode.pu_a.number),
       JSON.stringify(question), "", JSON.stringify(deltaCenters),
       // An empty selector keeps Penpa's full set of solving tools available.
       "[]",
       JSON.stringify(andSettings), '"x"', '"x"', "[3,2,4]", JSON.stringify(mode),
-      '"x"', nativeLines.usesCustomColors ? "1" : "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
+      '"x"', artwork.cellColors.length ? "1" : "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
     let text = lines.join("\n");
     for (const [plain, short] of COMPRESS_SUB) text = text.split(plain).join(short);
     // Penpa reads Base64 literally; its loader does not URI-decode these fields.

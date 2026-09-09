@@ -135,7 +135,8 @@
     if (rows < 1 || cols < 1 || rows > 100 || cols > 100) fail('grid dimensions must be between 1 and 100.');
     const cellSize = num(options.cellSize, 'cell size', 38);
     if (cellSize < 10 || cellSize > 100) fail('cell size must be between 10 and 100.');
-    const warnings = [], warned = new Set(), layers = Object.fromEntries(LAYERS.map(layer => [layer, []]));
+    const interactionBounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL};
+    const cellColors = [], warnings = [], warned = new Set(), layers = Object.fromEntries(LAYERS.map(layer => [layer, []]));
     const bounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL}, gridOcclusions = [], cageOcclusions = [], artworkOcclusions = [];
     let captureArtwork = false;
     function protectArtwork(draw) {
@@ -346,6 +347,12 @@
         lastKind=kind;
       }
       if(!tokens.length)fail('empty SVG path data.');
+      if(layer) {
+        interactionBounds.left=Math.min(interactionBounds.left,pathBounds.left);
+        interactionBounds.top=Math.min(interactionBounds.top,pathBounds.top);
+        interactionBounds.right=Math.max(interactionBounds.right,pathBounds.right);
+        interactionBounds.bottom=Math.max(interactionBounds.bottom,pathBounds.bottom);
+      }
       if(layer==='overlay'||layer==='notes')gridOcclusions.push(pathBounds);
       return tokens.join(' ');
     }
@@ -446,7 +453,11 @@
       const cell=puzzle.cells[r][c]??{};
       if(typeof cell!=='object')fail('each cell must be an object.');
       for(const key of Object.keys(cell))if(!['value','given','pencilMarks','centremarks','candidates','color','backgroundColor','highlight'].includes(key))warn('Unsupported cell property “'+key+'” was not applied.');
-      if(cell.backgroundColor||cell.color)append('cell-colors',element('rect',{x:c*SOURCE_CELL,y:r*SOURCE_CELL,width:SOURCE_CELL,height:SOURCE_CELL,fill:paint(cell.backgroundColor??cell.color)}));
+      if(cell.backgroundColor||cell.color) {
+        const color=paint(cell.backgroundColor??cell.color);
+        if(visiblePaint(color))cellColors.push([r,c,color]);
+        if(!options.omitCellColors)append('cell-colors',element('rect',{x:c*SOURCE_CELL,y:r*SOURCE_CELL,width:SOURCE_CELL,height:SOURCE_CELL,fill:color}));
+      }
       if(cell.highlight)warn('Cell highlight markers are not converted.');
       const centre=cell.centremarks??cell.candidates;
       if(Array.isArray(centre)&&centre.length)text({center:[r+.5,c+.5],text:centre.join(''),fontSize:18,textStroke:'#ffffff',maxWidth:SOURCE_CELL*.85},'notes',false);
@@ -500,7 +511,7 @@
     const content=LAYERS.map(layer=>element('g',{'data-layer':layer},layers[layer].join(''))).join('');
     const svg=element('svg',{xmlns:'http://www.w3.org/2000/svg',width:width*2.5,height:height*2.5,viewBox:'0 0 '+width+' '+height},
       element('g',{transform:'translate('+decimal(originX)+' '+decimal(originY)+') scale('+decimal(cellSize/SOURCE_CELL)+')'},content));
-    return {svg,width,height,marginX,marginY,centerX,centerY,gridOcclusions,
+    return {svg,width,height,marginX,marginY,centerX,centerY,originX,originY,cellColors,interactionBounds,gridOcclusions,
       lineOcclusions:[...gridOcclusions,...cageOcclusions,...artworkOcclusions],warnings};
   }
   const api={render,gridEdgeOccluded};
