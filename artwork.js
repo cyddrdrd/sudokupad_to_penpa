@@ -73,6 +73,13 @@
   function pathData(points, close = false) {
     return points.map(([x,y],i) => (i ? 'L' : 'M') + decimal(x) + ' ' + decimal(y)).join(' ') + (close ? ' Z' : '');
   }
+  function gridEdgeOccluded(boxes, x1, y1, x2, y2) {
+    return boxes.some(box => Math.max(x1,x2) >= box.left-2 && Math.min(x1,x2) <= box.right+2 &&
+      Math.max(y1,y2) >= box.top-2 && Math.min(y1,y2) <= box.bottom+2);
+  }
+  function visiblePaint(color) {
+    return !/^(?:none|transparent|#[0-9a-f]{3}0|#[0-9a-f]{6}00|rgba\([^)]*[,/]\s*0(?:\.0+)?\s*\))$/i.test(color);
+  }
 
   // Follow the exposed clockwise edges of a union of square cells, then move
   // each contour inward. This also handles holes and disconnected cage pieces.
@@ -129,20 +136,30 @@
     const cellSize = num(options.cellSize, 'cell size', 38);
     if (cellSize < 10 || cellSize > 100) fail('cell size must be between 10 and 100.');
     const warnings = [], warned = new Set(), layers = Object.fromEntries(LAYERS.map(layer => [layer, []]));
-    const bounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL};
+    const bounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL}, gridOcclusions = [];
     function warn(message) { if (!warned.has(message)) { warned.add(message); warnings.push(message); } }
-    function box(x,y,width,height,pad=0) {
+    function box(x,y,width,height,pad=0,layer) {
       bounds.left=Math.min(bounds.left,x-pad); bounds.top=Math.min(bounds.top,y-pad);
       bounds.right=Math.max(bounds.right,x+width+pad); bounds.bottom=Math.max(bounds.bottom,y+height+pad);
+      if (layer === 'overlay' || layer === 'notes') {
+        gridOcclusions.push({left:x-pad,top:y-pad,right:x+width+pad,bottom:y+height+pad});
+      }
     }
     function append(layer, markup) {
       if (!LAYERS.includes(layer)) fail('unsupported drawing layer: ' + layer);
       layers[layer].push(markup);
     }
+    function pointBox(points,pad,layer) {
+      let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
+      for(const [x,y] of points) {left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
+      box(left,top,right-left,bottom-top,pad,layer);
+    }
     function validate(object, allowed, label) {
       if (!object || typeof object !== 'object' || Array.isArray(object)) fail(label + ' must be an object.');
       for (const key of Object.keys(object)) {
-        if (/^(?:on|href$|xlink:|src$|style$|transform$|filter$|mask$|clip-path$)/i.test(key)) fail(label + ' contains unsupported SVG attribute ' + key + '.');
+        // Cage style is a named puzzle convention checked by cage(), never CSS.
+        if (/^(?:on|href$|xlink:|src$|style$|transform$|filter$|mask$|clip-path$)/i.test(key) &&
+          !(key === 'style' && allowed === CAGE_KEYS)) fail(label + ' contains unsupported SVG attribute ' + key + '.');
         if (!allowed.has(key)) warn(label + ': unsupported property “' + key + '” was not applied.');
       }
     }
@@ -180,11 +197,13 @@
       const width=maxWidth===undefined?estimatedWidth:Math.min(estimatedWidth,maxWidth), height=font*lines.length*1.2;
       const left=anchor==='start'?x:anchor==='end'?x-width:x-width/2;
       const angle=num(part.angle,'text rotation',0);
-      if (angle) {const radius=Math.hypot(width,height)/2+Math.abs(left+width/2-x);box(x-radius,y-radius,2*radius,2*radius);}
-      else box(left,y-height/2,width,height,font*.1);
-      const attributes={x,y,fill:paint(part.textColor ?? part.color ?? part.fill,'#000000'),
+      const textFill=paint(part.textColor ?? part.color ?? part.fill,'#000000'),textStroke=paint(part.textStroke ?? part.stroke,'#ffffff');
+      const visibleLayer=opacity(part.opacity)>0 && (visiblePaint(textFill)||visiblePaint(textStroke))?layer:undefined;
+      if (angle) {const radius=Math.hypot(width,height)/2+Math.abs(left+width/2-x);box(x-radius,y-radius,2*radius,2*radius,0,visibleLayer);}
+      else box(left,y-height/2,width,height,font*.1,visibleLayer);
+      const attributes={x,y,fill:textFill,
         'font-family':'Arial, Helvetica, sans-serif','font-size':font,'text-anchor':anchor,'dominant-baseline':baseline,
-        stroke:paint(part.textStroke ?? part.stroke,'#ffffff'),'stroke-width':part.textStroke==='none'?0:2,
+        stroke:textStroke,'stroke-width':part.textStroke==='none'?0:2,
         'paint-order':'stroke fill','stroke-linejoin':'round',opacity:opacity(part.opacity)};
       if (part['font-family'] !== undefined) {
         if (!/^[\w\s,'"-]+$/.test(part['font-family'])) fail('invalid font family.');
@@ -225,18 +244,27 @@
         const radius=part.roundedRadius===undefined?Math.min(rw,rh)/2:nonnegative(part.roundedRadius,'corner radius');
         attributes.rx=radius;attributes.ry=radius;
       }
+      const visibleLayer=w&&h&&attributes.opacity>0 &&
+        ((visiblePaint(fill) && (attributes['fill-opacity']??1)>0) ||
+          (lineWidth>0 && visiblePaint(stroke) && (attributes['stroke-opacity']??1)>0))?layer:undefined;
       if (angle) {
         attributes.transform='rotate('+decimal(angle)+' '+decimal(cx)+' '+decimal(cy)+')';
         const radians=angle*Math.PI/180, bw=Math.abs(w*Math.cos(radians))+Math.abs(h*Math.sin(radians)),bh=Math.abs(w*Math.sin(radians))+Math.abs(h*Math.cos(radians));
-        box(cx-bw/2,cy-bh/2,bw,bh,lineWidth/2);
-      } else box(cx-w/2,cy-h/2,w,h,lineWidth/2);
+        box(cx-bw/2,cy-bh/2,bw,bh,lineWidth/2,visibleLayer);
+      } else box(cx-w/2,cy-h/2,w,h,lineWidth/2,visibleLayer);
       if (w&&h) append(layer,element('rect',attributes));
       if (part.text!==undefined && part.text!=='') text({...part,backgroundColor:undefined,stroke:undefined,fill:undefined},layer);
     }
     // SVG path data is geometry only: no markup, URLs, CSS, or executable
     // attributes enter the result. Parse every command to validate its arity and
     // include control points in conservative outside-clue bounds.
-    function rawPath(value, thickness) {
+    function rawPath(value, thickness, layer) {
+      const pathBounds={left:Infinity,top:Infinity,right:-Infinity,bottom:-Infinity};
+      function pathBox(x,y,width,height,pad) {
+        box(x,y,width,height,pad);
+        pathBounds.left=Math.min(pathBounds.left,x-pad);pathBounds.top=Math.min(pathBounds.top,y-pad);
+        pathBounds.right=Math.max(pathBounds.right,x+width+pad);pathBounds.bottom=Math.max(pathBounds.bottom,y+height+pad);
+      }
       if (typeof value!=='string'||value.length>1000000) fail('invalid SVG path data.');
       const tokenPattern=/[MLHVCSQTAZmlhvcsqtaz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g;
       const tokens=value.match(tokenPattern)||[];
@@ -258,7 +286,7 @@
         i+=arity;
         const oldX=x,oldY=y,px=relative?x:0,py=relative?y:0;
         if ((kind==='S'&&['C','S'].includes(lastKind))||(kind==='T'&&['Q','T'].includes(lastKind))) {
-          box(2*x-lastControl[0],2*y-lastControl[1],0,0,thickness*2);
+          pathBox(2*x-lastControl[0],2*y-lastControl[1],0,0,thickness*2);
         }
         if(kind==='H')x=px+args[0];
         else if(kind==='V')y=py+args[0];
@@ -276,15 +304,15 @@
             const localCX=coefficient*radiusX*localY/radiusY,localCY=-coefficient*radiusY*localX/radiusX;
             const centerX=cos*localCX-sin*localCY+(x+endX)/2,centerY=sin*localCX+cos*localCY+(y+endY)/2;
             const extentX=Math.hypot(radiusX*cos,radiusY*sin),extentY=Math.hypot(radiusX*sin,radiusY*cos);
-            box(centerX-extentX,centerY-extentY,2*extentX,2*extentY,thickness*2);
+            pathBox(centerX-extentX,centerY-extentY,2*extentX,2*extentY,thickness*2);
           }
           x=endX;y=endY;
         } else {
-          for(let a=0;a<args.length;a+=2)box(px+args[a],py+args[a+1],0,0,thickness*2);
+          for(let a=0;a<args.length;a+=2)pathBox(px+args[a],py+args[a+1],0,0,thickness*2);
           x=px+args[args.length-2];y=py+args[args.length-1];
           if(kind==='M'){startX=x;startY=y;command=relative?'l':'L';}
         }
-        box(x,y,0,0,thickness*2);
+        pathBox(x,y,0,0,thickness*2);
         if(kind==='C'||kind==='S')lastControl=[px+args[args.length-4],py+args[args.length-3]];
         else if(kind==='Q')lastControl=[px+args[0],py+args[1]];
         else if(kind==='T')lastControl=lastControl&&['Q','T'].includes(lastKind)?[2*oldX-lastControl[0],2*oldY-lastControl[1]]:[oldX,oldY];
@@ -292,16 +320,23 @@
         lastKind=kind;
       }
       if(!tokens.length)fail('empty SVG path data.');
+      if(layer==='overlay'||layer==='notes')gridOcclusions.push(pathBounds);
       return tokens.join(' ');
     }
     function line(part, arrow=false) {
+      // Some published puzzles interleave author labels with their lines.
+      // SudokuPad treats those strings as empty drawing entries.
+      if (!arrow && typeof part === 'string') return;
       validate(part,arrow?ARROW_KEYS:LINE_KEYS,arrow?'arrow':'line');
       const layer=part.target ?? 'arrows', points=list(part.wayPoints,'line waypoints').map((point)=>{const [r,c]=rc(point,'waypoint');return [c*SOURCE_CELL,r*SOURCE_CELL];});
       if (!points.length) {
         if (part.d) {
           if(arrow)fail('arrows require wayPoints rather than raw SVG path data.');
           const options=strokeOptions(part,1),thickness=options['stroke-width'];
-          append(layer,element('path',{fill:paint(part.fill),stroke:paint(part.color??part.stroke),'stroke-linecap':'round','stroke-linejoin':'round',...options,d:rawPath(part.d,thickness)}));
+          const fill=paint(part.fill),stroke=paint(part.color??part.stroke);
+          const visibleLayer=options.opacity>0 && ((visiblePaint(fill)&&(options['fill-opacity']??1)>0)||
+            (thickness>0&&visiblePaint(stroke)&&(options['stroke-opacity']??1)>0))?layer:undefined;
+          append(layer,element('path',{fill,stroke,'stroke-linecap':'round','stroke-linejoin':'round',...options,d:rawPath(part.d,thickness,visibleLayer)}));
           return;
         }
         warn('An empty '+(arrow?'arrow':'line')+' was ignored.');return;
@@ -312,7 +347,9 @@
       if (!arrow && part.thickness===1 && part['stroke-width']===undefined) options['stroke-width']=2;
       const thickness=options['stroke-width'];
       const common={fill:paint(part.fill),stroke:color,'stroke-linecap':arrow?'butt':'round','stroke-linejoin':'round',...options};
-      for(const [x,y] of points) box(x,y,0,0,thickness*2);
+      const visibleLayer=options.opacity>0 && ((visiblePaint(common.fill)&&(options['fill-opacity']??1)>0)||
+        (thickness>0&&visiblePaint(color)&&(options['stroke-opacity']??1)>0))?layer:undefined;
+      pointBox(points,thickness*2,visibleLayer);
       if (!arrow) {append(layer,element('path',{...common,d:pathData(points)}));return;}
       const style=part.headStyle ?? 'stroke';
       if (!['stroke','fill'].includes(style)) fail('unsupported arrowhead style '+style+'.');
@@ -331,7 +368,7 @@
       const stemEnd=style==='fill'?[end[0]-unit[0]*Math.max(0,back*(1-indent)-.5),end[1]-unit[1]*Math.max(0,back*(1-indent)-.5)]:tip;
       append(layer,element('path',{...common,d:pathData([...points.slice(0,-1),stemEnd])}));
       const head=style==='fill'?[left,tip,right,[tip[0]-unit[0]*back*(1-indent),tip[1]-unit[1]*back*(1-indent)]]:[left,tip,right];
-      for(const [x,y] of head)box(x,y,0,0,thickness*2);
+      pointBox(head,thickness*2,visibleLayer);
       append(layer,element('path',{...common,'stroke-linejoin':'miter',fill:style==='fill'?color:'none','stroke-width':style==='fill'?0:thickness,d:pathData(head,style==='fill')}));
     }
     function cellList(value,label) {
@@ -351,7 +388,8 @@
         fpBoxIndexer:{inset:.0390625,fill:'#7C7CC733',stroke:'#7C7CC7',width:4}};
       const layer=type==='box'?'cell-grids':'cages';
       if(!['hidden','',undefined].includes(type)) {
-        const style=styles[type];if(!style)fail('unsupported cage style '+type+'.');
+        if(typeof type!=='string'||!Object.prototype.hasOwnProperty.call(styles,type))fail('unsupported cage style '+type+'.');
+        const style=styles[type];
         const polygons=outlines(cells,style.inset);
         const attributes={d:polygons.map(points=>pathData(points,true)).join(' '),fill:paint(style.fill),stroke:paint(part.borderColor??part.outlineC??style.stroke),
           'stroke-width':style.width,'stroke-dasharray':style.dash,'stroke-linejoin':'round','fill-rule':'evenodd'};
@@ -395,23 +433,43 @@
     const grid=[];
     for(let r=0;r<=rows;r++)grid.push(pathData([[0,r*SOURCE_CELL],[cols*SOURCE_CELL,r*SOURCE_CELL]]));
     for(let c=0;c<=cols;c++)grid.push(pathData([[c*SOURCE_CELL,0],[c*SOURCE_CELL,rows*SOURCE_CELL]]));
-    if (![true,1,'1','true'].includes(puzzle.settings?.nogrid)) append('cell-grids',element('path',{d:grid.join(' '),fill:'none',stroke:'#000000','stroke-width':1,'stroke-dasharray':[true,1,'1','true'].includes(puzzle.settings?.dashedgrid)?'3 10':undefined}));
+    const gridVisible=![true,1,'1','true'].includes(puzzle.settings?.nogrid),gridLayerIndex=layers['cell-grids'].length;
     for(const region of list(puzzle.regions,'regions'))cage(region,true);
     for(const part of list(puzzle.overlays,'overlays'))shape(part,'overlay');
+    if (gridVisible) {
+      if (options.nativeGrid) {
+        // Penpa redraws these edges over surface fills. Keep masked edges in
+        // the image instead so native lines cannot cut through clue artwork.
+        grid.length=0;
+        const edge=(x1,y1,x2,y2)=>{
+          if(gridEdgeOccluded(gridOcclusions,x1,y1,x2,y2))grid.push(pathData([[x1,y1],[x2,y2]]));
+        };
+        for(let r=0;r<=rows;r++)for(let c=0;c<cols;c++)edge(c*SOURCE_CELL,r*SOURCE_CELL,(c+1)*SOURCE_CELL,r*SOURCE_CELL);
+        for(let c=0;c<=cols;c++)for(let r=0;r<rows;r++)edge(c*SOURCE_CELL,r*SOURCE_CELL,c*SOURCE_CELL,(r+1)*SOURCE_CELL);
+      }
+      if(grid.length)layers['cell-grids'].splice(gridLayerIndex,0,element('path',{d:grid.join(' '),fill:'none',stroke:'#000000','stroke-width':1,
+        'stroke-dasharray':[true,1,'1','true'].includes(puzzle.settings?.dashedgrid)?'3 10':undefined}));
+    }
 
-    const extraX=Math.max(0,-bounds.left/SOURCE_CELL-.25,bounds.right/SOURCE_CELL-cols-.25);
-    const extraY=Math.max(0,-bounds.top/SOURCE_CELL-.25,bounds.bottom/SOURCE_CELL-rows-.25);
-    const initialMarginX=Math.ceil(extraX*4)/4,initialMarginY=Math.ceil(extraY*4)/4;
-    const width=Math.ceil((cols+1+2*initialMarginX)*cellSize),height=Math.ceil((rows+1+2*initialMarginY)*cellSize);
+    // Fit each side independently. Penpa places a grid point at the canvas
+    // center, so snap the artwork midpoint to its half-cell point lattice.
+    // Keep it within the points Penpa creates, even for very distant artwork.
+    function axisLayout(start,end,cells) {
+      const left=Math.min(-.5,start/SOURCE_CELL-.25),right=Math.max(cells+.5,end/SOURCE_CELL+.25);
+      const center=Math.max(-1.5,Math.min(cells+2,Math.round(left+right)/2));
+      return {center,length:Math.ceil(2*Math.max(center-left,right-center)*cellSize)};
+    }
+    const horizontal=axisLayout(bounds.left,bounds.right,cols),vertical=axisLayout(bounds.top,bounds.bottom,rows);
+    const width=horizontal.length,height=vertical.length,centerX=horizontal.center,centerY=vertical.center;
     if(width>10000||height>10000||width*height>16000000)fail('drawing dimensions are too large.');
     const marginX=(width/cellSize-cols-1)/2,marginY=(height/cellSize-rows-1)/2;
-    const originX=(width-cols*cellSize)/2+.5,originY=(height-rows*cellSize)/2+.5;
+    const originX=width/2-centerX*cellSize+.5,originY=height/2-centerY*cellSize+.5;
     const content=LAYERS.map(layer=>element('g',{'data-layer':layer},layers[layer].join(''))).join('');
     const svg=element('svg',{xmlns:'http://www.w3.org/2000/svg',width:width*2.5,height:height*2.5,viewBox:'0 0 '+width+' '+height},
       element('g',{transform:'translate('+decimal(originX)+' '+decimal(originY)+') scale('+decimal(cellSize/SOURCE_CELL)+')'},content));
-    return {svg,width,height,marginX,marginY,warnings};
+    return {svg,width,height,marginX,marginY,centerX,centerY,gridOcclusions,warnings};
   }
-  const api={render};
+  const api={render,gridEdgeOccluded};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   root.SudokuPadArtwork=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

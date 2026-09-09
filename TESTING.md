@@ -1,10 +1,22 @@
-# Testing 0.2.0
+# Testing 0.2.1
 
-Checked on 2026-09-06 against SudokuPad 0.611.0 and Penpa+ 3.2.4.
+Checked on 2026-09-09 against SudokuPad 0.611.0 and Penpa+ 3.2.4.
 
 ## Automated checks
 
-Run `npm test` (Node 18 or newer; no install needed). All 149 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, logging retries that do not interrupt conversion, and token-protected JSON/CSV views, numbered IDs, and request location/browser metadata.
+Run `npm test` (Node 18 or newer; no install needed). All 172 tests pass. The suite uses synthetic puzzles and Penpa's pinned, unmodified answer-check implementation. It covers mixed single- and multi-digit answers, givens, empty solution layers, all three answer-check options, source formats, short-link retrieval, safe parsing, drawing layers, and complex outlines. Version 0.2.0 adds checks for creator-named links, clickable rules, original Source addresses, usage storage, logging retries that do not interrupt conversion, and token-protected JSON/CSV views, numbered IDs, and request location/browser metadata.
+
+## 0.2.1 drawing regressions
+
+The actual Penpa+ 3.2.4 editor loads both [Wreath](https://sudokupad.app/zyjs2yh4bp) [versions](https://sudokupad.app/g58mmwifkd), retaining all nine octagons, twenty coloured lines, and the second version's twelve labels. Their correct answers pass, changed digits fail, and the answer-check opt-out works.
+
+[Japanese Nurikabe (2)](https://sudokupad.app/wtddstx0cx?setting-conflictchecker=0) retains its 130 outside clues. Its canvas changes from 1102 × 1083 to 874 × 874, with normal right and bottom margins. Native cell centres match the artwork, and a puzzle without a stored answer remains unchecked.
+
+Actual Surface drags across adjacent cells retain thin grid lines and thick region borders. Native given and entered digits remain visible, and a white overlay still hides the grid beneath it. Automated checks also cover asymmetric clues on each side, all grid dimension parities, dashed/hidden grids, safe named cage styles, and masked edges.
+
+All ten browser cases pass, including repeat checks of Krop Circles, Circles and Dots, Factory Farming, Area 51, and Oyster. These retain their drawing layers, rotated emoji, and hidden-grid settings.
+
+Decorations remain embedded artwork. Surface fills can still cover decorations and grid portions beneath decorative masks; those portions are deliberately kept in the image so native lines do not cut through the artwork.
 
 ## 0.2.0 regression examples
 

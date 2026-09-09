@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.1] - 2026-09-09
+
+- Support puzzle data with text labels between drawing objects, including both Wreath links.
+- Keep standard grid lines and region borders visible when using Penpa's Surface tool.
+- Remove unnecessary opposite-side margins around puzzles with outside clues.
+
+---
+
 ## [0.2.0] - 2026-09-06
 
 - Add usage logging with numbered IDs, location/browser details, and token-protected JSON and CSV views.
