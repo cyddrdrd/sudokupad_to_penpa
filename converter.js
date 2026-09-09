@@ -243,8 +243,20 @@
     delete visiblePuzzle.solution;
     delete visiblePuzzle.metadata.solution;
     visiblePuzzle.cages = (puzzle.cages || []).filter(cage => cage && (cage.cells || []).some(Array.isArray));
-    const artwork = root.SudokuPadArtwork.render(visiblePuzzle, {cellSize: size, nativeGrid: true});
+    const clues = root.SudokuPadNativeClues.planClues(visiblePuzzle, {cellSize: size});
+    const renderOptions = {cellSize: size, nativeGrid: true,
+      nativeOverlayText: new Set(clues.overlayIndices), nativeUnderlayText: new Set(clues.underlayIndices)};
+    let artwork = root.SudokuPadArtwork.render(visiblePuzzle, renderOptions);
+    const nativeLines = root.SudokuPadNative.planLines(visiblePuzzle,
+      {cellSize: size, occlusions: artwork.lineOcclusions});
+    if (nativeLines.lineIndices.size) {
+      artwork = root.SudokuPadArtwork.render(visiblePuzzle, {...renderOptions, nativeLineIndices: nativeLines.lineIndices});
+    }
     addNativeGrid(visiblePuzzle, artwork, question, rows, cols);
+    Object.assign(question.line, nativeLines.line);
+    Object.assign(colors.line, nativeLines.colors);
+    Object.assign(question.number, clues.question.number);
+    Object.assign(question.numberS, clues.question.numberS);
     // Penpa's four point bands provide every half-cell coordinate. Align its
     // native cells with the artwork after fitting asymmetric outside clues.
     const centerX = artwork.centerX, centerY = artwork.centerY;
@@ -269,7 +281,7 @@
       // An empty selector keeps Penpa's full set of solving tools available.
       "[]",
       JSON.stringify(andSettings), '"x"', '"x"', "[3,2,4]", JSON.stringify(mode),
-      '"x"', "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
+      '"x"', nativeLines.usesCustomColors ? "1" : "0", JSON.stringify(colors), "x", JSON.stringify(orSettings), "[]", "false"];
     let text = lines.join("\n");
     for (const [plain, short] of COMPRESS_SUB) text = text.split(plain).join(short);
     // Penpa reads Base64 literally; its loader does not URI-decode these fields.

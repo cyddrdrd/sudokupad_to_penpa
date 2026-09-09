@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.2] - 2026-09-09
+
+- Keep supported coloured lines and outer grid borders visible above Surface colours.
+- Keep plain in-cell and corner clues visible above Surface colours, including Japanese Nurikabe clues.
+- Fix cell borders incorrectly hidden by blank notes and nearby text.
+
+---
+
 ## [0.2.1] - 2026-09-09
 
 - Support puzzle data with text labels between drawing objects, including both Wreath links.

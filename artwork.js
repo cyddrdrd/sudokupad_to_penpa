@@ -136,13 +136,23 @@
     const cellSize = num(options.cellSize, 'cell size', 38);
     if (cellSize < 10 || cellSize > 100) fail('cell size must be between 10 and 100.');
     const warnings = [], warned = new Set(), layers = Object.fromEntries(LAYERS.map(layer => [layer, []]));
-    const bounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL}, gridOcclusions = [];
+    const bounds = {left:0,top:0,right:cols*SOURCE_CELL,bottom:rows*SOURCE_CELL}, gridOcclusions = [], cageOcclusions = [], artworkOcclusions = [];
+    let captureArtwork = false;
+    function protectArtwork(draw) {
+      captureArtwork = true;
+      try { draw(); } finally { captureArtwork = false; }
+    }
     function warn(message) { if (!warned.has(message)) { warned.add(message); warnings.push(message); } }
     function box(x,y,width,height,pad=0,layer) {
       bounds.left=Math.min(bounds.left,x-pad); bounds.top=Math.min(bounds.top,y-pad);
       bounds.right=Math.max(bounds.right,x+width+pad); bounds.bottom=Math.max(bounds.bottom,y+height+pad);
       if (layer === 'overlay' || layer === 'notes') {
         gridOcclusions.push({left:x-pad,top:y-pad,right:x+width+pad,bottom:y+height+pad});
+      }
+      // Retargeted shapes and arrowheads can also cover source lines. Keep
+      // intersecting lines in the artwork so promotion cannot reveal them.
+      if (captureArtwork && layer && LAYERS.indexOf(layer) >= LAYERS.indexOf('arrows')) {
+        artworkOcclusions.push({left:x-pad,top:y-pad,right:x+width+pad,bottom:y+height+pad});
       }
     }
     function append(layer, markup) {
@@ -182,25 +192,41 @@
       out.opacity=opacity(part.opacity);
       return out;
     }
-    function text(part, layer, legacyFont = true) {
+    function text(part, layer, legacyFont = true, native = false) {
       const [r,c]=rc(part.center,'text position');
       const h=num(part.height,'text height',1), x=c*SOURCE_CELL, y=(r+.06*h)*SOURCE_CELL;
       const font=nonnegative(part.fontSize,'font size',24)+(legacyFont && part.fontSize!==undefined?4:0);
       if (!font) return;
       const value=String(part.text ?? ''), lines=value.split(/\r?\n/);
+      if (!value.trim()) return;
       const anchor=part.textAnchor ?? part['text-anchor'] ?? 'middle';
       if (!['start','middle','end'].includes(anchor)) fail('invalid text anchor.');
       const baseline=part['dominant-baseline'] ?? 'middle';
       if (!['middle','central','alphabetic','hanging','text-before-edge','text-after-edge','auto'].includes(baseline)) fail('invalid text baseline.');
       const maxWidth=part.maxWidth===undefined?undefined:nonnegative(part.maxWidth,'maximum text width');
-      const estimatedWidth=Math.max(...lines.map(line => [...line].reduce((total,ch)=>total+(/[\u0000-\u00ff]/.test(ch)?.75:1),0)))*font;
+      // Plain Arial digits and question marks advance about .556 em. A .6 em
+      // estimate keeps outside numeric clues from falsely masking the frame;
+      // retain the more conservative width for other text, fonts and styles.
+      const plainNumeric=/^[0-9?\r\n]+$/.test(value) && part['font-family']===undefined &&
+        [undefined,'normal',400,'400'].includes(part['font-weight']) &&
+        [undefined,'normal'].includes(part['font-style']);
+      const estimatedWidth=Math.max(...lines.map(line => [...line].reduce((total,ch)=>total+
+        (plainNumeric?.6:/[\u0000-\u00ff]/.test(ch)?.75:1),0)))*font;
       const width=maxWidth===undefined?estimatedWidth:Math.min(estimatedWidth,maxWidth), height=font*lines.length*1.2;
       const left=anchor==='start'?x:anchor==='end'?x-width:x-width/2;
       const angle=num(part.angle,'text rotation',0);
       const textFill=paint(part.textColor ?? part.color ?? part.fill,'#000000'),textStroke=paint(part.textStroke ?? part.stroke,'#ffffff');
-      const visibleLayer=opacity(part.opacity)>0 && (visiblePaint(textFill)||visiblePaint(textStroke))?layer:undefined;
-      if (angle) {const radius=Math.hypot(width,height)/2+Math.abs(left+width/2-x);box(x-radius,y-radius,2*radius,2*radius,0,visibleLayer);}
-      else box(left,y-height/2,width,height,font*.1,visibleLayer);
+      const visibleLayer=!native && opacity(part.opacity)>0 && (visiblePaint(textFill)||visiblePaint(textStroke))?layer:undefined;
+      // Alphabetic labels end at their baseline; treating it as their centre
+      // can incorrectly mark the next row's grid edge as covered by text.
+      const top=y-(baseline==='alphabetic'||baseline==='auto'?font+(lines.length-1)*font*.6:
+        baseline==='hanging'||baseline==='text-before-edge'?(lines.length-1)*font*.6:
+        baseline==='text-after-edge'?font*1.2+(lines.length-1)*font*.6:height/2);
+      if (angle) {
+        const radians=angle*Math.PI/180,cos=Math.cos(radians),sin=Math.sin(radians);
+        pointBox([[left,top],[left+width,top],[left+width,top+height],[left,top+height]].map(([xx,yy])=>
+          [x+(xx-x)*cos-(yy-y)*sin,y+(xx-x)*sin+(yy-y)*cos]),font*.1,visibleLayer);
+      } else box(left,top,width,height,font*.1,visibleLayer);
       const attributes={x,y,fill:textFill,
         'font-family':'Arial, Helvetica, sans-serif','font-size':font,'text-anchor':anchor,'dominant-baseline':baseline,
         stroke:textStroke,'stroke-width':part.textStroke==='none'?0:2,
@@ -220,9 +246,9 @@
       if (angle) attributes.transform='rotate('+decimal(angle)+' '+decimal(x)+' '+decimal(y)+')';
       if (maxWidth!==undefined && estimatedWidth>maxWidth) {attributes.textLength=maxWidth;attributes.lengthAdjust='spacingAndGlyphs';}
       const content=lines.length===1?esc(value):lines.map((line,i)=>element('tspan',{x,dy:i?font*1.2:-(lines.length-1)*font*.6},esc(line))).join('');
-      append(layer,element('text',attributes,content));
+      if (!native) append(layer,element('text',attributes,content));
     }
-    function shape(part, defaultLayer) {
+    function shape(part, defaultLayer, nativeText = false) {
       validate(part,SHAPE_KEYS,'shape');
       const layer=part.target ?? defaultLayer;
       const [r,c]=rc(part.center,'shape center'), w=nonnegative(part.width,'shape width',1)*SOURCE_CELL,
@@ -253,7 +279,7 @@
         box(cx-bw/2,cy-bh/2,bw,bh,lineWidth/2,visibleLayer);
       } else box(cx-w/2,cy-h/2,w,h,lineWidth/2,visibleLayer);
       if (w&&h) append(layer,element('rect',attributes));
-      if (part.text!==undefined && part.text!=='') text({...part,backgroundColor:undefined,stroke:undefined,fill:undefined},layer);
+      if (part.text!==undefined && part.text!=='') text({...part,backgroundColor:undefined,stroke:undefined,fill:undefined},layer,true,nativeText);
     }
     // SVG path data is geometry only: no markup, URLs, CSS, or executable
     // attributes enter the result. Parse every command to validate its arity and
@@ -323,20 +349,21 @@
       if(layer==='overlay'||layer==='notes')gridOcclusions.push(pathBounds);
       return tokens.join(' ');
     }
-    function line(part, arrow=false) {
+    function line(part, arrow=false, native=false) {
       // Some published puzzles interleave author labels with their lines.
       // SudokuPad treats those strings as empty drawing entries.
       if (!arrow && typeof part === 'string') return;
       validate(part,arrow?ARROW_KEYS:LINE_KEYS,arrow?'arrow':'line');
+      const appendLine=(layer,markup)=>{if(!native)append(layer,markup);};
       const layer=part.target ?? 'arrows', points=list(part.wayPoints,'line waypoints').map((point)=>{const [r,c]=rc(point,'waypoint');return [c*SOURCE_CELL,r*SOURCE_CELL];});
       if (!points.length) {
         if (part.d) {
           if(arrow)fail('arrows require wayPoints rather than raw SVG path data.');
           const options=strokeOptions(part,1),thickness=options['stroke-width'];
           const fill=paint(part.fill),stroke=paint(part.color??part.stroke);
-          const visibleLayer=options.opacity>0 && ((visiblePaint(fill)&&(options['fill-opacity']??1)>0)||
+          const visibleLayer=!native && options.opacity>0 && ((visiblePaint(fill)&&(options['fill-opacity']??1)>0)||
             (thickness>0&&visiblePaint(stroke)&&(options['stroke-opacity']??1)>0))?layer:undefined;
-          append(layer,element('path',{fill,stroke,'stroke-linecap':'round','stroke-linejoin':'round',...options,d:rawPath(part.d,thickness,visibleLayer)}));
+          appendLine(layer,element('path',{fill,stroke,'stroke-linecap':'round','stroke-linejoin':'round',...options,d:rawPath(part.d,thickness,visibleLayer)}));
           return;
         }
         warn('An empty '+(arrow?'arrow':'line')+' was ignored.');return;
@@ -347,10 +374,10 @@
       if (!arrow && part.thickness===1 && part['stroke-width']===undefined) options['stroke-width']=2;
       const thickness=options['stroke-width'];
       const common={fill:paint(part.fill),stroke:color,'stroke-linecap':arrow?'butt':'round','stroke-linejoin':'round',...options};
-      const visibleLayer=options.opacity>0 && ((visiblePaint(common.fill)&&(options['fill-opacity']??1)>0)||
+      const visibleLayer=!native && options.opacity>0 && ((visiblePaint(common.fill)&&(options['fill-opacity']??1)>0)||
         (thickness>0&&visiblePaint(color)&&(options['stroke-opacity']??1)>0))?layer:undefined;
       pointBox(points,thickness*2,visibleLayer);
-      if (!arrow) {append(layer,element('path',{...common,d:pathData(points)}));return;}
+      if (!arrow) {appendLine(layer,element('path',{...common,d:pathData(points)}));return;}
       const style=part.headStyle ?? 'stroke';
       if (!['stroke','fill'].includes(style)) fail('unsupported arrowhead style '+style+'.');
       const angle=num(part.headAngle,'arrowhead angle',90);
@@ -366,10 +393,10 @@
       const tip=style==='stroke'?[end[0]-unit[0]*thickness,end[1]-unit[1]*thickness]:end;
       const left=[tip[0]-unit[0]*back-unit[1]*side,tip[1]-unit[1]*back+unit[0]*side],right=[tip[0]-unit[0]*back+unit[1]*side,tip[1]-unit[1]*back-unit[0]*side];
       const stemEnd=style==='fill'?[end[0]-unit[0]*Math.max(0,back*(1-indent)-.5),end[1]-unit[1]*Math.max(0,back*(1-indent)-.5)]:tip;
-      append(layer,element('path',{...common,d:pathData([...points.slice(0,-1),stemEnd])}));
+      appendLine(layer,element('path',{...common,d:pathData([...points.slice(0,-1),stemEnd])}));
       const head=style==='fill'?[left,tip,right,[tip[0]-unit[0]*back*(1-indent),tip[1]-unit[1]*back*(1-indent)]]:[left,tip,right];
       pointBox(head,thickness*2,visibleLayer);
-      append(layer,element('path',{...common,'stroke-linejoin':'miter',fill:style==='fill'?color:'none','stroke-width':style==='fill'?0:thickness,d:pathData(head,style==='fill')}));
+      appendLine(layer,element('path',{...common,'stroke-linejoin':'miter',fill:style==='fill'?color:'none','stroke-width':style==='fill'?0:thickness,d:pathData(head,style==='fill')}));
     }
     function cellList(value,label) {
       return list(value,label).map((point)=>{const [r,c]=rc(point,label);if(!Number.isInteger(r)||!Number.isInteger(c))fail(label+' cells must use integer coordinates.');return[r,c];});
@@ -381,6 +408,12 @@
       if(!cells.length){if(!region)warn('An empty cage was ignored.');return;}
       if(part.hidden===true)return;
       const type=region?'box':part.style??(['rowcol','disjoint'].includes(part.type)?'hidden':'killer');
+      // Cage outlines, fills and their white label backgrounds are painted
+      // above ordinary source lines. Do not promote a line through them.
+      if(!region && (type!=='hidden'&&type!=='' || String(part.value??'').trim())) {
+        for(const [r,c] of cells)cageOcclusions.push({left:c*SOURCE_CELL,top:r*SOURCE_CELL,
+          right:(c+1)*SOURCE_CELL,bottom:(r+1)*SOURCE_CELL});
+      }
       const styles={killer:{inset:.08,stroke:'#000000',width:1.5,dash:'5 3'},box:{inset:0,stroke:'#000000',width:3},
         windoku:{inset:.08,fill:'#cfcfcf33',width:0},extraregion:{inset:.09375,fill:'rgba(178,178,178,0.4)',width:0},
         fpRowIndexer:{inset:.0390625,fill:'#7CC77C33',stroke:'#7CC77C',width:4},
@@ -408,7 +441,7 @@
     for(const key of Object.keys(puzzle)) if(!METADATA.has(key)) warn('Unsupported puzzle property “'+key+'” was not applied to its artwork.');
     for(const [key,value]of Object.entries(puzzle.settings??{})) if(['hidecolours','hidecages','hidegivens','darkmode','outlinesonlines','largedigits'].includes(key)&&![false,0,'0',null,undefined].includes(value))warn('The SudokuPad drawing setting “'+key+'” has no artwork equivalent in Penpa.');
     if(puzzle.foglight?.length||puzzle.fogofwar?.length)fail('dynamic fog cannot be represented by a static Penpa puzzle.');
-    for(const part of list(puzzle.underlays,'underlays'))shape(part,'underlay');
+    list(puzzle.underlays,'underlays').forEach((part,index)=>protectArtwork(()=>shape(part,'underlay',options.nativeUnderlayText?.has(index))));
     for(let r=0;r<rows;r++)for(let c=0;c<(puzzle.cells[r]||[]).length;c++) {
       const cell=puzzle.cells[r][c]??{};
       if(typeof cell!=='object')fail('each cell must be an object.');
@@ -423,11 +456,11 @@
       }
     }
     if ([true,1,'1','true'].includes(puzzle.settings?.arrowsabovelines)) {
-      for(const part of list(puzzle.lines,'lines'))line(part);
-      for(const part of list(puzzle.arrows,'arrows'))line(part,true);
+      list(puzzle.lines,'lines').forEach((part,index)=>line(part,false,options.nativeLineIndices?.has(index)));
+      for(const part of list(puzzle.arrows,'arrows'))protectArtwork(()=>line(part,true));
     } else {
-      for(const part of list(puzzle.arrows,'arrows'))line(part,true);
-      for(const part of list(puzzle.lines,'lines'))line(part);
+      for(const part of list(puzzle.arrows,'arrows'))protectArtwork(()=>line(part,true));
+      list(puzzle.lines,'lines').forEach((part,index)=>line(part,false,options.nativeLineIndices?.has(index)));
     }
     for(const part of list(puzzle.cages,'cages'))cage(part);
     const grid=[];
@@ -435,7 +468,7 @@
     for(let c=0;c<=cols;c++)grid.push(pathData([[c*SOURCE_CELL,0],[c*SOURCE_CELL,rows*SOURCE_CELL]]));
     const gridVisible=![true,1,'1','true'].includes(puzzle.settings?.nogrid),gridLayerIndex=layers['cell-grids'].length;
     for(const region of list(puzzle.regions,'regions'))cage(region,true);
-    for(const part of list(puzzle.overlays,'overlays'))shape(part,'overlay');
+    list(puzzle.overlays,'overlays').forEach((part,index)=>protectArtwork(()=>shape(part,'overlay',options.nativeOverlayText?.has(index))));
     if (gridVisible) {
       if (options.nativeGrid) {
         // Penpa redraws these edges over surface fills. Keep masked edges in
@@ -467,7 +500,8 @@
     const content=LAYERS.map(layer=>element('g',{'data-layer':layer},layers[layer].join(''))).join('');
     const svg=element('svg',{xmlns:'http://www.w3.org/2000/svg',width:width*2.5,height:height*2.5,viewBox:'0 0 '+width+' '+height},
       element('g',{transform:'translate('+decimal(originX)+' '+decimal(originY)+') scale('+decimal(cellSize/SOURCE_CELL)+')'},content));
-    return {svg,width,height,marginX,marginY,centerX,centerY,gridOcclusions,warnings};
+    return {svg,width,height,marginX,marginY,centerX,centerY,gridOcclusions,
+      lineOcclusions:[...gridOcclusions,...cageOcclusions,...artworkOcclusions],warnings};
   }
   const api={render,gridEdgeOccluded};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
