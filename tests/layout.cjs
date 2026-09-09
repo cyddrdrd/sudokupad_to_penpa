@@ -17,19 +17,29 @@ function penpaPoint(id, rows, cols, size) {
 function checkAlignment(puzzle) {
   const decoded = decodePenpa(loadApp().convertPuzzle(puzzle).url);
   const {rows, cols, header, background, svg} = decoded;
+  const sourceRows = puzzle.cells.length, sourceCols = puzzle.cells[0].length;
   const size = Number(header[3]), width = Number(header[7]), height = Number(header[8]);
   const [originX, originY] = /<g transform="translate\(([-\d.]+) ([-\d.]+)\)/.exec(svg).slice(1).map(Number);
   const center = penpaPoint(Number(header[9]), rows, cols, size);
   assert.equal(background.width, width);
   assert.equal(background.height, height);
   assert.equal(header[9], header[10]);
+  const marker = background.sudokupad_artwork;
+  assert.equal(marker.version, 1);
+  assert.equal(marker.anchor, decoded.centerlist[0], 'the drawing must follow the original grid cell when resized');
+  assert.ok(Math.abs(marker.offsetX + (originX + size / 2) / size) < .00001);
+  assert.ok(Math.abs(marker.offsetY + (originY + size / 2) / size) < .00001);
+  assert.equal(marker.widthCells, width / size);
+  assert.equal(marker.heightCells, height / size);
+  assert.equal(decoded.centerlist.length, sourceRows * sourceCols,
+    'outside interaction cells must not become extra solving cells');
   for (const [index, id] of decoded.centerlist.entries()) {
     const native = penpaPoint(id, rows, cols, size);
     const x = native[0] + width / 2 - center[0] + .5;
     const y = native[1] + height / 2 - center[1] + .5;
-    assert.ok(Math.abs(x - (originX + (index % cols + .5) * size)) < .001,
+    assert.ok(Math.abs(x - (originX + (index % sourceCols + .5) * size)) < .001,
       'native cell and surface x coordinate must match the artwork');
-    assert.ok(Math.abs(y - (originY + (Math.floor(index / cols) + .5) * size)) < .001,
+    assert.ok(Math.abs(y - (originY + (Math.floor(index / sourceCols) + .5) * size)) < .001,
       'native cell and surface y coordinate must match the artwork');
   }
   return {decoded, width, height, size, originX, originY};
@@ -81,5 +91,25 @@ test('distant artwork retains valid Penpa centering points and stays inside the 
     assert.ok(originY + (center[0] - .5) * size >= 0);
     assert.ok(originX + (center[1] + .5) * size <= width);
     assert.ok(originY + (center[0] + .5) * size <= height);
+  }
+});
+
+
+test('raw SVG artwork outside the grid gets real interaction cells', () => {
+  const puzzle = fixture();
+  puzzle.lines = [{d: 'M -192 -128 L -160 -96', color: '#000000', thickness: 2}];
+  const {decoded} = checkAlignment(puzzle);
+  const space = JSON.parse(decoded.lines[1]);
+  assert.ok(space[0] >= 2 && space[2] >= 3);
+  assert.equal(decoded.centerlist.length, 6);
+});
+
+test('nonpainted given cell colors never become dark native Surface fills', () => {
+  for (const backgroundColor of ['none', 'transparent', '#FFFFFF00', '#FFF0', 'rgba(255,0,0,0)']) {
+    const puzzle = fixture();
+    puzzle.cells[0][0].backgroundColor = backgroundColor;
+    const decoded = decodePenpa(loadApp().convertPuzzle(puzzle).url);
+    assert.deepEqual(decoded.question.surface, {}, backgroundColor);
+    assert.equal(decoded.lines[13], '0', backgroundColor);
   }
 });

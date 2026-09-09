@@ -531,8 +531,8 @@ test('standard grid suppression and dashed-grid settings are carried into Penpa'
   assert.equal(JSON.parse(hidden.lines[11]).grid[0], '3');
   p.settings = {dashedgrid: true};
   const dashed = decodePenpa(app.convertPuzzle(p).url);
-  assert.equal(JSON.parse(dashed.lines[11]).grid[0], '2');
-  assert.match(dashed.svg, /data-layer="cell-grids"><\/g>/);
+  assert.equal(JSON.parse(dashed.lines[11]).grid[0], '3');
+  assert.match(dashed.svg, /stroke-dasharray="3 10"/);
 });
 
 test('concave and ring-shaped cages retain distinct outer and inner boundaries', () => {

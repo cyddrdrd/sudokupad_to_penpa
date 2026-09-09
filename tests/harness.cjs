@@ -104,7 +104,7 @@ function loadApp(options = {}) {
     },
   });
   const files = ['vendor/lz-string.min.js', 'vendor/pako.min.js', 'vendor/fpuzzlesdecoder.js',
-    'source.js', 'artwork.js', 'native.js', 'clue-native.js', 'converter.js'];
+    'source.js', 'artwork.js', 'layout.js', 'native.js', 'clue-native.js', 'converter.js'];
   for (const file of files) {
     if (!fs.existsSync(path.join(ROOT, file))) continue;
     vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), context, {filename: file});
