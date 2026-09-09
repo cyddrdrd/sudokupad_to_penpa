@@ -438,6 +438,23 @@ test('unsupported hosts and invalid source syntax do not trigger networking', as
   assert.equal(app.network.length, 0);
 });
 
+test('author labels interleaved with lines do not prevent conversion or change drawing order', () => {
+  const p = fixture({solution: '123456'});
+  const first = {wayPoints: [[0.5, 0.5], [0.5, 1.5]], color: '#f88', thickness: 9};
+  const second = {wayPoints: [[0.5, 1.5], [1.5, 1.5]], color: '#9f9', thickness: 9};
+  p.lines = ['entropic', first, 'whisper', second, '<script>not executable</script>'];
+  const app = loadApp();
+  for (const noSolutionCheck of [false, true]) {
+    const withLabels = app.convertPuzzle(p, {noSolutionCheck});
+    const withoutLabels = app.convertPuzzle({...p, lines: [first, second]}, {noSolutionCheck});
+    assert.equal(withLabels.url, withoutLabels.url);
+    assert.equal(withLabels.includedSolution, !noSolutionCheck);
+  }
+  for (const invalid of [null, 17, false, []]) {
+    assert.throws(() => app.convertPuzzle({...p, lines: [invalid]}), /line must be an object/);
+  }
+});
+
 test('zero-width rotated emoji overlays remain visible SVG text', () => {
   const p = fixture();
   p.overlays = [{center: [.5, .5], width: 0, height: 1.3, text: '🥚', fontSize: 46.8, angle: 19}];
@@ -505,15 +522,17 @@ test('hidden cages remain hidden and do not add outlines or clue numbers', () =>
   assert.match(svg, /data-layer="cages"><\/g>/);
 });
 
-test('standard grid suppression and dashed-grid settings are carried into artwork', () => {
+test('standard grid suppression and dashed-grid settings are carried into Penpa', () => {
   const p = fixture();
   const app = loadApp();
   p.settings = {nogrid: true};
-  const hidden = decodePenpa(app.convertPuzzle(p).url).svg;
-  assert.match(hidden, /data-layer="cell-grids"><\/g>/);
+  const hidden = decodePenpa(app.convertPuzzle(p).url);
+  assert.match(hidden.svg, /data-layer="cell-grids"><\/g>/);
+  assert.equal(JSON.parse(hidden.lines[11]).grid[0], '3');
   p.settings = {dashedgrid: true};
-  const dashed = decodePenpa(app.convertPuzzle(p).url).svg;
-  assert.match(dashed, /stroke-dasharray="3 10"/);
+  const dashed = decodePenpa(app.convertPuzzle(p).url);
+  assert.equal(JSON.parse(dashed.lines[11]).grid[0], '2');
+  assert.match(dashed.svg, /data-layer="cell-grids"><\/g>/);
 });
 
 test('concave and ring-shaped cages retain distinct outer and inner boundaries', () => {

@@ -111,7 +111,7 @@ function loadApp(options = {}) {
   }
   if (options.captureArtwork || options.renderer) {
     const actual = context.SudokuPadArtwork;
-    context.SudokuPadArtwork = {render(puzzle, renderOptions) {
+    context.SudokuPadArtwork = {...actual, render(puzzle, renderOptions) {
       artworkInputs.push(clone(puzzle));
       return options.renderer ? options.renderer(puzzle, renderOptions) : actual.render(puzzle, renderOptions);
     }};
