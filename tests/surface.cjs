@@ -154,3 +154,64 @@ test('stroke-only overlay text still protects the grid it covers', () => {
   const {pu} = referenceDrawing(decoded);
   assert.ok(decoded.question.deletelineE[cellEdge(pu, decoded.centerlist[0], 1)]);
 });
+
+test('blank pencil marks do not erase native cell borders', () => {
+  const p = fixture();
+  p.cells[0][0].pencilMarks = [' '];
+  const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
+  assert.deepEqual(decoded.question.deletelineE, {});
+});
+
+test('alphabetic text above a row boundary does not hide that boundary', () => {
+  const p = fixture();
+  p.overlays = [{center: [.83, .5], width: 0, height: 0, text: 'XYZ', fontSize: 16,
+    'dominant-baseline': 'alphabetic'}];
+  const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
+  const {pu, events} = referenceDrawing(decoded);
+  pu.draw();
+  const bottom = cellEdge(pu, decoded.centerlist[0], 2);
+  assert.equal(decoded.question.deletelineE[bottom], undefined);
+  assert.equal(edgeWasDrawn(pu, events, bottom), true);
+  assert.match(decoded.svg, />XYZ<\/text>/);
+});
+
+test('native constraint lines do not move above cage labels and masks', () => {
+  const p = fixture();
+  p.lines = [{wayPoints: [[.5, .5], [.5, 1.5]], color: '#FF00FF', thickness: 9}];
+  p.cages = [{cells: [[0, 0], [0, 1]], value: '12'}];
+  const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
+  assert.deepEqual(decoded.question.line, {});
+  assert.match(decoded.svg, /stroke="#FF00FF"/);
+  assert.match(decoded.svg, />12<\/text>/);
+});
+
+test('retargeted masks and arrowheads keep their priority over crossing lines', () => {
+  for (const kind of ['overlays', 'underlays', 'arrows']) {
+    const p = fixture({rows: 2, cols: 2});
+    p.lines = [{wayPoints: [[.5, .5], [1.5, 1.5]], color: '#FF88FF', thickness: 9}];
+    p[kind] = kind === 'arrows'
+      ? [{wayPoints: [[.5, 1.5], [1.5, .5]], color: '#000000', thickness: 4, target: 'cell-grids'}]
+      : [{center: [1, 1], width: .5, height: .5, backgroundColor: '#FFFFFF', target: 'arrows'}];
+    const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
+    assert.deepEqual(decoded.question.line, {}, kind);
+    assert.match(decoded.svg, /stroke="#FF88FF"/);
+  }
+});
+
+test('outside plain numeric labels do not falsely mask the Japanese Nurikabe outer frame', () => {
+  const p = fixture({rows: 16, cols: 16});
+  p.lines = [{target: 'cell-grids', thickness: 7.2, color: '#000000',
+    wayPoints: [[16, 0], [0, 0], [0, 16], [16, 16], [16, 0]]}];
+  p.overlays = [{'stroke-width': 0, 'dominant-baseline': 'alphabetic',
+    fontSize: 34.4, text: '??', center: [1.7, -.5], height: 0, width: 0}];
+  const decoded = decodePenpa(loadApp().convertPuzzle(p).url);
+  assert.equal(Object.keys(decoded.question.line).length, 4);
+  assert.ok(Object.values(decoded.question.line).every(style => style === 21));
+  assert.match(decoded.svg, />\?\?<\/text>/);
+  assert.doesNotMatch(decoded.svg, /stroke-width="7.2"/);
+  // Do not underestimate deliberately wider fonts or styled labels.
+  for (const style of [{'font-weight': 'bold'}, {'font-style': 'italic'}, {'font-family': 'Courier New'}]) {
+    const variant = {...p, overlays: [{...p.overlays[0], ...style}]};
+    assert.deepEqual(decodePenpa(loadApp().convertPuzzle(variant).url).question.line, {});
+  }
+});

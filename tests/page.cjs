@@ -96,7 +96,7 @@ for (const noSolutionCheck of [false, true]) {
     assert.equal(init.keepalive, true);
     assert.deepEqual({...event, eventId: undefined, startedAt: undefined}, {
       eventId: undefined, startedAt: undefined, inputUrl: INPUT, noSolutionCheck,
-      outputUrl: OUTPUT, inputFormat: 'scl', error: null, version: '0.2.1', status: 'success'
+      outputUrl: OUTPUT, inputFormat: 'scl', error: null, version: '0.2.2', status: 'success'
     });
     assert.match(event.eventId, /^[a-f0-9-]{36}$/);
     assert.equal(new Date(event.startedAt).toISOString(), event.startedAt);
