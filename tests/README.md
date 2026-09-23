@@ -14,8 +14,9 @@ Coverage includes:
 
 - Both checkbox states, sources without answers, and empty answer placeholders.
 - Native answer checking with mixed single-digit and multi-digit values, given clues, zeroes, letters and unused cells.
+- Partial answer checks with `?` wildcards, required blanks, arbitrary wildcard entries, and structural resizing in the bundled viewer.
 - Empty solver answer layers, preserved metadata, and removal of solution metadata from artwork.
-- Embedded SCL/CTC, F-puzzles and SCF formats, compact syntax, URL aliases, shortened links and fallback responses.
+- Embedded SCL/CTC, F-puzzles and SCF formats, compact syntax, URL aliases, shortened links (including F-puzzles `?id=`), expansion errors, redirect loops and fallback responses.
 - Static artwork layers, transparency, rotation, emoji, hidden cages, custom grids and cage holes.
 - Rejection of malformed data, unsupported interactive features and unsafe drawing attributes.
 

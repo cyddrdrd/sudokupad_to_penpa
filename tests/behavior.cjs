@@ -160,8 +160,8 @@ for (const [rows, cols] of [[2, 3], [3, 2], [3, 3], [2, 2], [4, 9], [9, 4]]) {
   });
 }
 
-test('invalid or partial stored answers fail clearly and can be omitted explicitly', () => {
-  for (const solution of ['12345', '12?456', ['1', '2', {}, '4', '5', '6']]) {
+test('invalid stored answers fail clearly and can be omitted explicitly', () => {
+  for (const solution of ['12345', ['1', '2', {}, '4', '5', '6']]) {
     const app = loadApp();
     const p = fixture({solution});
     assert.throws(() => app.convertPuzzle(p), /stored answer|partial answer/i);
@@ -169,6 +169,33 @@ test('invalid or partial stored answers fail clearly and can be omitted explicit
     assert.equal(result.includedSolution, false);
     assert.equal(decodePenpa(result.url).params.a, undefined);
   }
+});
+
+test('partial answers keep wildcards separate from required blanks and given digits', () => {
+  for (const solution of ['?2.4?6', ['?', 2, '.', 4, '?', 6], [['?', 2, '.'], [4, '?', 6]]]) {
+    const p = fixture({solution});
+    p.cells[0][0].value = 9; // A given at an unchecked position is not a conflict.
+    const result = loadApp().convertPuzzle(p);
+    const decoded = decodePenpa(result.url);
+    const [a, b, , d, e, f] = decoded.centerlist;
+    assert.equal(result.includedSolution, true);
+    assert.deepEqual(decoded.background.sudokupad_artwork.uncheckedCells, [a, e]);
+    assert.deepEqual(decoded.answer[4], [`${b},2`, `${d},4`, `${f},6`].sort());
+    assert.deepEqual(decoded.question.number[a], ['9', 1, '1']);
+    assert.equal(decoded.answerLayer, null);
+    assert.equal(decoded.settings.sol_number, true);
+  }
+});
+
+test('partial checking opt-out removes the answer, wildcard mask and checker settings', () => {
+  const p = fixture({solution: '12?4?6'});
+  const result = loadApp().convertPuzzle(p, {noSolutionCheck: true});
+  const decoded = decodePenpa(result.url);
+  assert.equal(result.hasSolution, true);
+  assert.equal(result.includedSolution, false);
+  assert.equal(decoded.params.a, undefined);
+  assert.equal(decoded.background.sudokupad_artwork.uncheckedCells, undefined);
+  assert.ok(Object.values(decoded.settings).every(value => !value));
 });
 
 test('a given conflicting with the stored answer fails unless checking is omitted', () => {
@@ -410,6 +437,70 @@ test('TinyURL expansion keeps the existing worker response contract', async () =
   assert.equal(result.hasSolution, true);
   assert.equal(result.includedSolution, false);
   assert.equal(app.network.length, 1);
+});
+
+test('F-puzzles short IDs expand through TinyURL and preserve the original source URL', async () => {
+  for (const input of ['https://f-puzzles.com/?id=y8cojfdr',
+    'http://www.f-puzzles.com/?other=1&id=%79%38cojfdr#ignored']) {
+    const fp = {size: 2, grid: [[{value: 1, given: true}, {}], [{}, {}]], solution: [1, 2, 2, 1]};
+    let target;
+    const app = loadApp({fetch: async url => {
+      const request = new URL(url);
+      assert.equal(request.origin, 'https://tinyurl-expand.cyddrdrd.workers.dev');
+      assert.equal(request.searchParams.get('url'), 'https://tinyurl.com/y8cojfdr');
+      return {ok: true, text: async () => JSON.stringify({success: true, longurl: target})};
+    }});
+    target = 'https://f-puzzles.com/?load=' + app.LZString.compressToBase64(JSON.stringify(fp));
+    for (const noSolutionCheck of [false, true]) {
+      const result = await app.convert(input, {noSolutionCheck});
+      const decoded = decodePenpa(result.url);
+      assert.equal(result.format, 'fpuz');
+      assert.equal(result.includedSolution, !noSolutionCheck);
+      assert.equal(decoded.header[17], input);
+      if (!noSolutionCheck) assert.deepEqual(decoded.answer,
+        createReference({rows: 2, cols: 2}).answer(decoded.question, ['1', '2', '2', '1']));
+    }
+    assert.equal(app.network.length, 2);
+  }
+});
+
+test('F-puzzles short links without a saved solution remain unchecked', async () => {
+  let target;
+  const app = loadApp({fetch: async () => ({ok: true,
+    text: async () => JSON.stringify({success: true, longurl: target})})});
+  target = 'https://f-puzzles.com/?load=' + app.LZString.compressToBase64(JSON.stringify({
+    size: 2, grid: [[{}, {}], [{}, {}]]}));
+  const result = await app.convert('https://f-puzzles.com/?id=synthetic-test');
+  assert.equal(result.hasSolution, false);
+  assert.equal(result.includedSolution, false);
+  assert.equal(decodePenpa(result.url).params.a, undefined);
+});
+
+test('an embedded F-puzzles payload takes precedence over an optional short ID', async () => {
+  const app = loadApp();
+  const compressed = app.LZString.compressToBase64(JSON.stringify({size: 2, grid: [[{}, {}], [{}, {}]]}));
+  assert.equal((await app.convert('https://f-puzzles.com/?id=unused&load=' + compressed)).format, 'fpuz');
+  assert.equal(app.network.length, 0);
+});
+
+test('missing or malformed F-puzzles IDs fail without fetching a different URL', async () => {
+  const app = loadApp();
+  for (const query of ['', '?id=', '?id=..', '?id=a%2Fb', '?id=a%3Fb', '?id=a%23b', '?id=%20a']) {
+    await assert.rejects(app.convert('https://f-puzzles.com/' + query), /missing its puzzle data|invalid short ID/);
+  }
+  assert.equal(app.network.length, 0);
+});
+
+test('F-puzzles short links preserve expansion failures and redirect loop protection', async () => {
+  for (const [response, error] of [
+    [{ok: false, status: 503}, /HTTP 503/],
+    [{ok: true, text: async () => JSON.stringify({success: false})}, /could not be expanded/],
+    [{ok: true, text: async () => JSON.stringify({success: true, longurl: 'https://f-puzzles.com/?id=example-loop'})}, /loop/i]
+  ]) {
+    const app = loadApp({fetch: async () => response});
+    await assert.rejects(app.convert('https://f-puzzles.com/?id=example-loop'), error);
+    assert.equal(app.network.length, 1);
+  }
 });
 
 test('shortener redirect loops fail rather than repeatedly fetching indefinitely', async () => {

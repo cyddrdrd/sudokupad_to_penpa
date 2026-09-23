@@ -18,7 +18,7 @@ The converter supports:
 - full SudokuPad links in SCL/CTC, F-puzzles, and SCF formats
 - SudokuPad short links and named puzzle paths
 - TinyURL links pointing to supported puzzles
-- full F-puzzles links
+- full F-puzzles links and shortened `?id=` links
 
 ## Features
 
@@ -34,7 +34,7 @@ The converter supports:
 
 Givens and entered digits use Penpa's number tools. The grid and decorations are a background image, so they cannot be edited as individual Penpa objects. Browser zoom works normally; Penpa's grid resizing and rotation do not move the background, and surface shading can cover it.
 
-Fog of war, interactive effects, and unsupported drawing features are reported. Partial answer checks containing unchecked cells cannot yet be reproduced; these puzzles can be converted with "No solution check" ticked.
+Fog of war, interactive effects, and unsupported drawing features are reported. Partial answer checks are preserved in the project's Penpa viewer: `?` answer cells accept any value or an empty cell, while specified digits and required blanks remain checked. The unchecked positions follow grid resizing. "No solution check" removes both the answer and its unchecked-cell mask.
 
 ## Browser recommendation
 - Chrome or Firefox is recommended

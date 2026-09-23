@@ -1,6 +1,6 @@
 let isConverting = false;
 const USAGE_ENDPOINT = "https://sudokupad-to-penpa-log.cyddrdrd.workers.dev/log";
-const APP_VERSION = "0.2.3";
+const APP_VERSION = "0.2.4";
 
 function beginUsage(inputUrl, noSolutionCheck) {
   const eventId = globalThis.crypto && typeof crypto.randomUUID === "function"

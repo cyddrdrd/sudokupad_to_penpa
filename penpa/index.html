@@ -113,7 +113,7 @@
         for (let i = 0; i < script_sources.length; i++) {
             let script = document.createElement("script");
             script.type = "text/javascript";
-            script.src = script_sources[i] + "?v=" + ver;
+            script.src = script_sources[i] + "?v=" + (script_sources[i] === "../penpa-adapter.js" ? "0.2.4" : ver);
             script.async = false;
             document.head.appendChild(script);
         }

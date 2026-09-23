@@ -2,7 +2,8 @@
 (function (root) {
   "use strict";
 
-  const PENPA_BASE = "https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/";
+  // Refresh the viewer HTML as well as its adapter for returning users.
+  const PENPA_BASE = "https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/?v=0.2.4";
   const CHECK_OPTIONS = ["surface_exact", "surface", "number", "loopline_exact", "loopline",
     "ignoreloopline", "loopedge_exact", "loopedge", "ignoreborder", "wall", "square",
     "circle", "tri", "arrow", "math", "battleship", "tent", "star", "akari", "mine"];
@@ -97,9 +98,9 @@
       throw new Error("The stored answer does not match the grid size. Tick No solution check to convert without it.");
     }
     return values.map(value => {
-      if (value === "?") {
-        throw new Error("Penpa cannot reproduce this puzzle's partial answer check. Tick No solution check to convert without it.");
-      }
+      // SudokuPad ignores '?' cells entirely, even when left empty. Keep them
+      // distinct from '.', which requires an empty cell in the saved answer.
+      if (value === "?") return "?";
       if (value === "." || value === "" || value === null) return "";
       if ((typeof value !== "string" && typeof value !== "number") ||
         !/^(?:\d+|[A-Za-z]+)$/.test(String(value))) {
@@ -178,20 +179,23 @@
     const layout = root.SudokuPadLayout.create(puzzle, {bounds: artwork.interactionBounds});
     const cellId = layout.cellId;
     const question = emptyLayer(), colors = emptyLayer(), centers = [], answer = [[], [], [], [], [], []];
+    const uncheckedCells = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const id = cellId(r, c), cell = puzzle.cells[r][c];
         if (!cell || typeof cell !== "object" || Array.isArray(cell)) throw new Error("Invalid cell data in the SudokuPad puzzle.");
         centers.push(id);
+        const expected = solution?.[r * cols + c];
+        if (expected === "?") uncheckedCells.push(id);
         const given = cell.value;
         if (given !== undefined && given !== null && given !== "") {
           if (!["string", "number"].includes(typeof given)) throw new Error("A given has an unsupported value.");
           question.number[id] = [String(given), 1, "1"];
-          if (solution && solution[r * cols + c] !== String(given)) {
+          if (solution && expected !== "?" && expected !== String(given)) {
             throw new Error("A given conflicts with the stored answer. Tick No solution check to convert without it.");
           }
-        } else if (solution && solution[r * cols + c] !== "") {
-          answer[4].push(id + "," + solution[r * cols + c]);
+        } else if (solution && expected !== "" && expected !== "?") {
+          answer[4].push(id + "," + expected);
         }
       }
     }
@@ -209,7 +213,8 @@
       sudokupad_artwork: {version: 1, anchor: cellId(0, 0),
         offsetX: -(artwork.originX + size / 2) / size,
         offsetY: -(artwork.originY + size / 2) / size,
-        widthCells: artwork.width / size, heightCells: artwork.height / size}};
+        widthCells: artwork.width / size, heightCells: artwork.height / size,
+        ...(uncheckedCells.length ? {uncheckedCells} : {})}};
     const mode = penpaMode(puzzle);
     const andSettings = Object.fromEntries(CHECK_OPTIONS.map(name => ["sol_" + name, includedSolution && name === "number"]));
     const orSettings = Object.fromEntries(CHECK_OPTIONS.filter(name => !["ignoreloopline", "ignoreborder"].includes(name))

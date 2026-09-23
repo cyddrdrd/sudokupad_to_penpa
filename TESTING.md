@@ -1,4 +1,19 @@
-# Testing 0.2.3
+# Testing 0.2.4
+
+Checked on 2026-09-23. `npm test` passes all 236 tests with no extra dependencies. Thirteen new regression tests cover F-puzzles short IDs, expansion errors and loops, partial answer serialization, wildcard and required-blank behavior, given clues, opt-out, structural resizing, and ordinary Penpa compatibility.
+
+## 0.2.4 reported links
+
+- `https://sudokupad.app/j7hx6zlxje`: the downloaded SCL data is **Fortress Fillomino - Hitlines (11x11)** by ThePedallingPianist. Its 121-cell answer contains 103 specified values and 18 `?` wildcards. Conversion succeeds with checking enabled. The unmodified bundled `penpa/js/class_p.js`, loaded with the production adapter in a Node VM, accepts the correct answer with empty or arbitrary wildcard entries. A wrong or missing value at each of the 103 specified positions fails. The opt-out removes both the answer payload and the wildcard mask.
+- `https://f-puzzles.com/?id=y8cojfdr`: the actual TinyURL redirect resolves to an embedded F-puzzles link for **Killer Tetris 2** by Hecspeed. Replaying that expansion response through the production decoder converts all 81 cells and preserves the original source URL. No solution is stored, so both checkbox states correctly produce an unchecked puzzle. The converter's pre-existing artwork warning for the `global` property remains.
+
+SudokuPad 0.611.0's `Checker.checkCellSolution` was inspected directly: `?` accepts any value or an empty cell, whereas `.` expects an empty cell. The fix preserves that distinction. Pinned independent Penpa resize methods verify that wildcard positions follow adding/removing rows or columns on all four sides.
+
+Validation limits: the expansion Worker returned HTTP 403 from this environment, so its response was replayed using the successfully resolved TinyURL destination. This release was not tested in a real browser because the Chromium download failed. Third-party puzzle payloads and solutions are kept outside the repository.
+
+## Earlier release checks
+
+The sections below record verification performed for previous releases.
 
 Checked on 2026-09-09 against SudokuPad 0.611.0 and the project-hosted Penpa+ 3.2.4.
 

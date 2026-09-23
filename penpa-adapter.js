@@ -1,4 +1,4 @@
-/* Imported SudokuPad artwork layer for the bundled Penpa+ 3.2.4 solver. */
+/* SudokuPad artwork and answer-check compatibility for bundled Penpa+ 3.2.4. */
 (function (root) {
   'use strict';
 
@@ -22,6 +22,11 @@
       anchor.y + marker.offsetY * puzzle.size,
       marker.widthCells * puzzle.size, marker.heightCells * puzzle.size];
     return rect.every(Number.isFinite) ? rect : null;
+  }
+
+  function uncheckedCells(marker) {
+    const cells = marker?.uncheckedCells;
+    return Array.isArray(cells) && cells.every(Number.isSafeInteger) ? cells : [];
   }
 
   function install(PuzzleClass, getSettings = () => typeof UserSettings === 'undefined' ? {} : UserSettings) {
@@ -61,7 +66,11 @@
       prototype.translate_puzzle_elements = function (translate, ...args) {
         const marker = artworkMarker(this);
         const nextAnchor = marker ? translate(marker.anchor) : null;
+        const nextUnchecked = marker ? uncheckedCells(marker).map(translate) : [];
         const result = translateElements.call(this, translate, ...args);
+        if (marker && Array.isArray(marker.uncheckedCells)) {
+          marker.uncheckedCells = nextUnchecked;
+        }
         if (marker && Number.isSafeInteger(nextAnchor) && nextAnchor >= 0) {
           marker.anchor = nextAnchor;
           // Removing enough outside rows can eventually delete the original
@@ -91,10 +100,17 @@
         // SudokuPad checks its source cells. Numbers written beside outside
         // clues are solving annotations, so they must not invalidate that
         // answer. Penpa's centre list follows structural board resizing.
-        if (artworkMarker(this) && !this.multisolution && Array.isArray(this.centerlist) &&
+        const marker = artworkMarker(this);
+        if (marker && !this.multisolution && Array.isArray(this.centerlist) &&
           Array.isArray(answer) && Array.isArray(answer[4])) {
           const cells = new Set(this.centerlist.map(Number));
-          answer[4] = answer[4].filter(entry => cells.has(Number(String(entry).split(',')[0])));
+          // Preserve SudokuPad's partial checks: digits in '?' cells may take
+          // any value or be absent. Required blank cells remain checked.
+          const unchecked = new Set(uncheckedCells(marker));
+          answer[4] = answer[4].filter(entry => {
+            const id = Number(String(entry).split(',')[0]);
+            return cells.has(id) && !unchecked.has(id);
+          });
         }
         return answer;
       };

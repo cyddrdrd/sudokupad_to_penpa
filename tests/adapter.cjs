@@ -51,14 +51,14 @@ function setup(options = {}) {
   return {puzzle, events, context, settings, Puzzle};
 }
 
-function setupResize() {
+function setupResize({rows = 9, cols = 9} = {}) {
   const fixture = setup(), {puzzle, context} = fixture;
-  Object.assign(puzzle, {nx: 9, ny: 9, nx0: 13, ny0: 13, corner_table: [],
+  Object.assign(puzzle, {nx: cols, ny: rows, nx0: cols + 4, ny0: rows + 4, corner_table: [],
     space: [0, 0, 0, 0], theta: 0, reflect: [1, 1],
-    width_c: 10, height_c: 10, canvasx: 380, canvasy: 380,
+    width_c: cols + 1, height_c: rows + 1, canvasx: (cols + 1) * 38, canvasy: (rows + 1) * 38,
     cursol: 28, cursolS: 28, freelinecircle_g: [-1, -1], selection: [], conflict_cells: [],
-    centerlist: Array.from({length: 81}, (_, index) =>
-      (2 + Math.floor(index / 9)) * 13 + 2 + index % 9),
+    centerlist: Array.from({length: rows * cols}, (_, index) =>
+      (2 + Math.floor(index / cols)) * (cols + 4) + 2 + index % cols),
     get_orientation() {return 0;},
     search_center() {this.center_n = this.centerlist[Math.floor(this.centerlist.length / 2)];},
     canvasxy_update() {this.canvasx = this.width_c * this.size; this.canvasy = this.height_c * this.size;},
@@ -74,6 +74,21 @@ function setupResize() {
   context.pu = puzzle;
   context.document = {getElementById() {return {getElementsByClassName() {return [];}};}};
   return fixture;
+}
+
+function setupConverted(source) {
+  const decoded = decodePenpa(loadApp().convertPuzzle(source).url);
+  const result = setupResize({rows: decoded.rows, cols: decoded.cols});
+  const {puzzle} = result;
+  puzzle.centerlist = decoded.centerlist.slice();
+  puzzle.bg_image_data = clone(decoded.background);
+  puzzle.pu_q = clone(decoded.question);
+  puzzle.solution = JSON.stringify(decoded.answer);
+  for (const entry of decoded.answer[4]) {
+    const [id, value] = entry.split(',');
+    puzzle.pu_a.number[id] = [value, 2, '1'];
+  }
+  return {...result, decoded};
 }
 
 test('actual Penpa draw order puts imported clue artwork above both Surface layers and below solving tools', () => {
@@ -275,4 +290,92 @@ test('outside annotation filtering follows the current centre list after structu
   assert.ok(puzzle.centerlist.includes(movedInside));
   assert.ok(!puzzle.centerlist.includes(movedOutside));
   assert.deepEqual(clone(puzzle.make_solution()[4]), [movedInside + ',4']);
+});
+
+test('partial checking accepts empty or arbitrary wildcard values, but rejects wrong or missing checked values', () => {
+  const {puzzle, decoded} = setupConverted(fixture({solution: '1?3?56'}));
+  const [first, wildcard, , otherWildcard] = decoded.centerlist;
+  const before = clone(puzzle.bg_image_data);
+  for (const value of [null, '0', '12', 'A']) {
+    if (value === null) delete puzzle.pu_a.number[wildcard];
+    else puzzle.pu_a.number[wildcard] = [value, 2, '1'];
+    puzzle.pu_a.number[otherWildcard] = ['99', 2, '1'];
+    assert.deepEqual(clone(puzzle.make_solution()), decoded.answer);
+  }
+  assert.deepEqual(puzzle.bg_image_data, before);
+  assert.deepEqual(puzzle.pu_a.number[wildcard], ['A', 2, '1']);
+  assert.deepEqual(puzzle.pu_a.number[otherWildcard], ['99', 2, '1']);
+  puzzle.pu_a.number[first] = ['9', 2, '1'];
+  assert.notDeepEqual(clone(puzzle.make_solution()), decoded.answer);
+  delete puzzle.pu_a.number[first];
+  assert.notDeepEqual(clone(puzzle.make_solution()), decoded.answer);
+});
+
+test('required blank cells remain checked when the same puzzle also contains wildcards', () => {
+  const {puzzle, decoded} = setupConverted(fixture({solution: '1?.456'}));
+  const [, wildcard, blank] = decoded.centerlist;
+  puzzle.pu_a.number[wildcard] = ['8', 2, '1'];
+  assert.deepEqual(clone(puzzle.make_solution()), decoded.answer);
+  puzzle.pu_a.number[blank] = ['8', 2, '1'];
+  assert.notDeepEqual(clone(puzzle.make_solution()), decoded.answer);
+  delete puzzle.pu_a.number[blank];
+  assert.deepEqual(clone(puzzle.make_solution()), decoded.answer);
+});
+
+test('11 by 11 partial checks retain all 103 specified cells and ignore only 18 wildcards', () => {
+  const values = Array.from({length: 121}, (_, i) => i < 18 ? '?' : String(i % 9 + 1));
+  const {puzzle, decoded} = setupConverted(fixture({rows: 11, cols: 11, solution: values}));
+  assert.equal(decoded.answer[4].length, 103);
+  for (const id of decoded.centerlist.slice(0, 18)) puzzle.pu_a.number[id] = ['12', 2, '1'];
+  assert.deepEqual(clone(puzzle.make_solution()), decoded.answer);
+  for (const id of decoded.centerlist.slice(18)) {
+    const saved = puzzle.pu_a.number[id];
+    puzzle.pu_a.number[id] = ['99', 2, '1'];
+    assert.notDeepEqual(clone(puzzle.make_solution()), decoded.answer);
+    puzzle.pu_a.number[id] = saved;
+  }
+});
+
+test('wildcard positions follow native structural resize on every side and survive reserialization', () => {
+  for (const side of ['t', 'b', 'l', 'r']) {
+    const {puzzle} = setupConverted(fixture({rows: 3, cols: 3, solution: '1?34?6789'}));
+    const originalMask = clone(puzzle.bg_image_data.sudokupad_artwork.uncheckedCells);
+    for (const id of originalMask) puzzle.pu_a.number[id] = ['99', 2, '1'];
+    for (const sign of [1, 1, -1, -1]) {
+      puzzle.resize_board(side, sign, 'white');
+      // Penpa saves the entire background object in both links and progress.
+      puzzle.bg_image_data = clone(puzzle.bg_image_data);
+      const moved = Object.keys(puzzle.pu_a.number).filter(id => puzzle.pu_a.number[id][0] === '99').map(Number);
+      assert.deepEqual(puzzle.bg_image_data.sudokupad_artwork.uncheckedCells, moved);
+      assert.equal(JSON.stringify(puzzle.make_solution()), puzzle.solution);
+      const checked = Number(JSON.parse(puzzle.solution)[4][0].split(',')[0]);
+      const saved = puzzle.pu_a.number[checked];
+      puzzle.pu_a.number[checked] = ['99', 2, '1'];
+      assert.notEqual(JSON.stringify(puzzle.make_solution()), puzzle.solution);
+      puzzle.pu_a.number[checked] = saved;
+    }
+    assert.deepEqual(puzzle.bg_image_data.sudokupad_artwork.uncheckedCells, originalMask);
+  }
+});
+
+test('wildcard filtering leaves ordinary Penpa and multiple-solution checks unchanged', () => {
+  const answer = [[], [], [], [], ['28,4', '29,8'], []];
+  const {puzzle} = setup({answer});
+  puzzle.centerlist = [28, 29];
+  puzzle.bg_image_data.sudokupad_artwork.uncheckedCells = [29];
+  assert.deepEqual(puzzle.make_solution()[4], ['28,4']);
+  puzzle.multisolution = true;
+  assert.deepEqual(puzzle.make_solution(), answer);
+  puzzle.multisolution = false;
+  delete puzzle.bg_image_data.sudokupad_artwork;
+  assert.deepEqual(puzzle.make_solution(), answer);
+});
+
+test('malformed wildcard masks do not disable checking', () => {
+  for (const mask of [null, {}, '28', [28, '29'], [NaN], [1.5]]) {
+    const {puzzle} = setup({answer: [[], [], [], [], ['28,4'], []]});
+    puzzle.centerlist = [28];
+    puzzle.bg_image_data.sudokupad_artwork.uncheckedCells = mask;
+    assert.deepEqual(puzzle.make_solution()[4], ['28,4']);
+  }
 });

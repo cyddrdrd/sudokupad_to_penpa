@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.4] - 2026-09-23
+
+- Support F-puzzles `?id=` short links through the existing TinyURL resolver.
+- Preserve partial SudokuPad answer checks in the project-hosted Penpa viewer, ignoring only `?` cells while checking specified values and required blanks.
+- Keep unchecked-cell positions aligned during structural grid resizing and omit them when "No solution check" is selected.
+- Refresh the viewer and adapter cache versions so returning users receive the partial-check fix.
+
+---
+
 ## [0.2.3] - 2026-09-09
 
 - Keep octagons, grid borders, and all clue artwork above Surface colours, with solving marks above the artwork.

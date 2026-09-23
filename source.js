@@ -373,7 +373,15 @@
         }
         if (["f-puzzles.com", "www.f-puzzles.com"].includes(host)) {
           const payload = rawQuery(url.search, "load");
-          if (!payload) throw new Error("The F-puzzles link is missing its puzzle data.");
+          if (!payload) {
+            // F-puzzles' ?id= links are aliases for TinyURL, not embedded data
+            // or SudokuPad IDs. Reuse the existing expansion and loop checks.
+            const id = rawQuery(url.search, "id");
+            if (id === null) throw new Error("The F-puzzles link is missing its puzzle data.");
+            if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("The F-puzzles link has an invalid short ID.");
+            data = "https://tinyurl.com/" + id;
+            continue;
+          }
           data = "fpuz" + payload;
         } else {
           if (!HOSTS.has(host)) throw new Error("Please use a SudokuPad, F-puzzles, or TinyURL link.");
