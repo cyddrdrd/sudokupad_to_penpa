@@ -3,7 +3,7 @@
   "use strict";
 
   // Refresh the viewer HTML as well as its adapter for returning users.
-  const PENPA_BASE = "https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/?v=0.2.4";
+  const PENPA_BASE = "https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/?v=0.2.5";
   const CHECK_OPTIONS = ["surface_exact", "surface", "number", "loopline_exact", "loopline",
     "ignoreloopline", "loopedge_exact", "loopedge", "ignoreborder", "wall", "square",
     "circle", "tri", "arrow", "math", "battleship", "tent", "star", "akari", "mine"];

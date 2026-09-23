@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.5] - 2026-09-23
+
+- Fix the blank Penpa editor introduced in 0.2.4: the viewer now reads puzzle data from the fragment even when a cache-version query is present.
+- Add regression checks against the actual startup function, including previously generated 0.2.4 links, legacy query links, and saved progress.
+
 ## [0.2.4] - 2026-09-23
 
 - Support F-puzzles `?id=` short links through the existing TinyURL resolver.

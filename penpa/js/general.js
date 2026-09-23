@@ -26,10 +26,10 @@ async function boot() {
     set_answer_setting_table_to("and");
     set_input_patterns();
 
-    var urlParam = location.search.substring(1);
-    if (!urlParam && location.hash) {
-        urlParam = location.hash.substring(1);
-    }
+    // A cache-version query must not hide puzzle data in the fragment.
+    // Keep literal base64 intact, including '+' characters.
+    var urlParam = [location.search.substring(1), location.hash.substring(1)]
+        .find(params => /(?:^|&)p=[^&]+/.test(params));
     if (urlParam) {
 
         let param = urlParam.split('&');

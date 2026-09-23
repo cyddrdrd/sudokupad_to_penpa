@@ -10,6 +10,7 @@ The original Penpa+ code is distributed under the [MIT License](LICENSE): copyri
 - Updated social metadata to the project-hosted address.
 - Loaded `../penpa-adapter.js` after the Penpa classes. This separate compatibility adapter adds the converter's clue-artwork layer and preserves partial SudokuPad answer checks without changing Penpa's visible controls or wording. Its cache version follows the converter release independently of Penpa's version.
 - Made `import_url` in `js/general.js` accept the URL fragment or query independently of the hosting path.
+- Fixed `boot` in `js/general.js` to find puzzle data even when the URL also has a cache-version query; this script's cache version follows the converter release.
 - Changed the local/file sharing fallback in `js/class_p.js` to the project-hosted Penpa address so converted artwork continues to use its compatible viewer.
 
 ## Bundled dependencies
