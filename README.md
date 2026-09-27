@@ -32,8 +32,7 @@ The converter supports:
   - Convert Only
   - Copy generated URL to clipboard
 
-Givens and entered digits use Penpa's number tools. The grid and decorations are a background image, so they cannot be edited as individual Penpa objects. Browser zoom works normally; Penpa's grid resizing and rotation do not move the background, and surface shading can cover it.
-
+Givens and entered digits use Penpa's number tools. The grid and decorations are a background image, so they cannot be edited as individual Penpa objects.
 Fog of war, interactive effects, and unsupported drawing features are reported. Partial answer checks are preserved in the project's Penpa viewer: `?` answer cells accept any value or an empty cell, while specified digits and required blanks remain checked. The unchecked positions follow grid resizing. "No solution check" removes both the answer and its unchecked-cell mask.
 
 ## Browser recommendation
@@ -51,9 +50,9 @@ The project has three main frontend files:
   - converter.js for the main SudokuPad decoding and Penpa+ conversion logic
 
 The frontend performs the main decoding and conversion in the browser using JavaScript, LZ-String, and pako.
-The "No solution check" option removes the answer-check data from the generated Penpa+ link; it does not solve the puzzle.
+The "No solution check" option removes the answer-check data from the generated Penpa+ link and results in solver mode.
 
-The main converter uses source.js to read SudokuPad formats and artwork.js to draw the puzzle. Full links are converted locally. Short links are retrieved through SudokuPad's public puzzle service; TinyURL links use the same expansion service as penpa_spoiler. This project does not log conversions.
+The main converter uses source.js to read SudokuPad formats and artwork.js to draw the puzzle. Full links are converted locally. Short links are retrieved through SudokuPad's public puzzle service; TinyURL links use the same expansion service as penpa_spoiler.
 
 Library sources and licences are listed in THIRD_PARTY.md. Run the regression tests with `node --test tests/behavior.cjs`.
 
