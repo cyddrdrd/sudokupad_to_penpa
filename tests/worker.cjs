@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const {join} = require('node:path');
+const {loadApp, fixture} = require('./harness.cjs');
 const workerPromise = import('data:text/javascript;base64,' +
   Buffer.from(readFileSync(join(__dirname, '../worker.js'), 'utf8')).toString('base64'));
 const origin = 'https://cyddrdrd.github.io';
@@ -76,6 +77,32 @@ test('successful conversions persist URLs, options, format and both timestamps',
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.equal(response.headers.get('Access-Control-Allow-Credentials'), null);
 });
+
+for (const [name, solution, noSolutionCheck] of [
+  ['partial answer checking', '12345?', false],
+  ['answer-check opt-out', '12345?', true],
+  ['no stored answer', undefined, false],
+]) {
+  test(`logging accepts the actual converter output with ${name}`, async () => {
+    const converted = loadApp().convertPuzzle(fixture({solution}), {noSolutionCheck});
+    const input = event({outputUrl: converted.url, noSolutionCheck});
+    const {response, db} = await run(input);
+    assert.equal(response.status, 201, await response.text());
+    assert.equal(db.rows.get(input.eventId)[4], converted.url);
+    assert.equal(db.rows.get(input.eventId)[5], Number(noSolutionCheck));
+  });
+}
+
+for (const outputUrl of [
+  'https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/#m=solve&p=example',
+  'https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/?m=solve&p=example',
+]) {
+  test('logging accepts the project viewer without a version query: ' + outputUrl, async () => {
+    const {response, db} = await run(event({outputUrl}));
+    assert.equal(response.status, 201);
+    assert.equal(db.calls, 1);
+  });
+}
 
 test('failed and blank-input attempts are stored without a made-up output link', async () => {
   const input = event({inputUrl: '', outputUrl: null, noSolutionCheck: true,
@@ -219,6 +246,10 @@ for (const [name, value] of [
   ['unknown status', event({status: 'started'})],
   ['success without output', event({outputUrl: null})],
   ['non-Penpa output', event({outputUrl: 'https://example.com/'})],
+  ['lookalike project host', event({outputUrl: 'https://cyddrdrd.github.io.attacker.test/sudokupad_to_penpa/penpa/#p=x'})],
+  ['wrong project path', event({outputUrl: 'https://cyddrdrd.github.io/another-project/penpa/#p=x'})],
+  ['project path prefix only', event({outputUrl: 'https://cyddrdrd.github.io/sudokupad_to_penpa/penpa/other/#p=x'})],
+  ['insecure project URL', event({outputUrl: 'http://cyddrdrd.github.io/sudokupad_to_penpa/penpa/#p=x'})],
   ['error with output', event({status: 'error', error: 'failed'})],
   ['error without message', event({status: 'error', outputUrl: null})],
   ['success with error', event({error: 'failed'})],

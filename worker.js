@@ -145,7 +145,7 @@ function validateEvent(value) {
   if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) throw invalid("Invalid version.");
   if (typeof value.noSolutionCheck !== "boolean") throw invalid("Invalid noSolutionCheck.");
   if (!["success", "error"].includes(value.status)) throw invalid("Invalid status.");
-  if (value.status === "success" && (!outputUrl || !/^https:\/\/swaroopg92\.github\.io\/penpa-edit\/[?#]/.test(outputUrl))) {
+  if (value.status === "success" && (!outputUrl || !/^https:\/\/(?:swaroopg92\.github\.io\/penpa-edit|cyddrdrd\.github\.io\/sudokupad_to_penpa\/penpa)\/[?#]/.test(outputUrl))) {
     throw invalid("A successful event requires a Penpa output URL.");
   }
   if (value.status === "error" && (!error || outputUrl)) throw invalid("An error event requires an error and no output URL.");
